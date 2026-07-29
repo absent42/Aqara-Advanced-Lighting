@@ -200,7 +200,7 @@ async def test_reload_entry(
     assert mock_config_entry.state is ConfigEntryState.LOADED
 
 
-async def test_migrate_removes_sole_config_entry_devices(
+async def test_setup_does_not_prune_devices_we_own(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_mqtt_client: MagicMock,
@@ -209,71 +209,59 @@ async def test_migrate_removes_sole_config_entry_devices(
     mock_segment_sequence_manager: MagicMock,
     mock_mqtt_wait: AsyncMock,
 ) -> None:
-    """Test that devices where we are the sole config entry are removed.
+    """Setup must leave devices our config entry owns alone.
 
-    Old-style devices were created with only our identifier and config entry,
-    resulting in duplicate devices in HA. The migration removes any device
-    where our config entry is the only one, so the backends can re-register
-    and properly merge with the MQTT/ZHA device.
+    Setup used to prune every device whose sole config entry was ours, as a
+    standing backstop for the one-time v1.2 -> v1.3 cleanup (covered by
+    test_v1_3_migration_removes_all_devices). From HA 2026.8 a device belongs
+    to exactly one config entry, so that check matches all of our devices and
+    deletes them on every setup -- losing area and name customisation,
+    regenerating device IDs, and detaching each device from the pre-migration
+    composite that keeps existing device automations resolving to us.
+
+    Covers both shapes the old prune targeted: a device with only our
+    identifier, and a partially merged device carrying the mqtt identifier too.
     """
     mock_config_entry.add_to_hass(hass)
 
     device_reg = dr.async_get(hass)
-    old_device = device_reg.async_get_or_create(
+    our_only = device_reg.async_get_or_create(
         config_entry_id=mock_config_entry.entry_id,
         identifiers={(DOMAIN, "0x00158d0001abcdef")},
         name="bedroom_light",
         manufacturer="Aqara",
         model="T2 LED strip controller",
     )
-    old_device_id = old_device.id
-
-    assert device_reg.async_get(old_device_id) is not None
-
-    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
-
-    assert device_reg.async_get(old_device_id) is None
-
-
-async def test_migrate_removes_partial_merge_devices(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_mqtt_client: MagicMock,
-    mock_state_manager: MagicMock,
-    mock_cct_sequence_manager: MagicMock,
-    mock_segment_sequence_manager: MagicMock,
-    mock_mqtt_wait: AsyncMock,
-) -> None:
-    """Test that partially merged devices (both identifiers, sole config entry) are removed.
-
-    A previous version could create devices with both our identifier and the
-    mqtt identifier but only our config entry (failed merge). These must be
-    removed so the backend can properly merge with the real MQTT device.
-    """
-    mock_config_entry.add_to_hass(hass)
-
-    device_reg = dr.async_get(hass)
-    partial_device = device_reg.async_get_or_create(
+    partial_merge = device_reg.async_get_or_create(
         config_entry_id=mock_config_entry.entry_id,
         identifiers={
-            (DOMAIN, "0x00158d0001abcdef"),
-            ("mqtt", "zigbee2mqtt_0x00158d0001abcdef"),
+            (DOMAIN, "0x00158d0002abcdef"),
+            ("mqtt", "zigbee2mqtt_0x00158d0002abcdef"),
         },
-        connections={(dr.CONNECTION_NETWORK_MAC, "00:15:8d:00:01:ab:cd:ef")},
-        name="bedroom_light",
+        connections={(dr.CONNECTION_NETWORK_MAC, "00:15:8d:00:02:ab:cd:ef")},
+        name="hallway_light",
         manufacturer="Aqara",
         model="T2 LED strip controller",
     )
-    partial_device_id = partial_device.id
+    our_only_id = our_only.id
+    partial_merge_id = partial_merge.id
 
-    assert device_reg.async_get(partial_device_id) is not None
+    # A user customisation a delete/recreate cycle would silently lose
+    device_reg.async_update_device(our_only_id, name_by_user="Bedroom Bulb")
 
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    # Should be removed (only our config entry, even though it has mqtt identifiers)
-    assert device_reg.async_get(partial_device_id) is None
+    surviving = device_reg.async_get(our_only_id)
+    assert surviving is not None, (
+        "a device whose only config entry is ours must survive setup"
+    )
+    assert surviving.name_by_user == "Bedroom Bulb", (
+        "user customisation must survive setup"
+    )
+    assert device_reg.async_get(partial_merge_id) is not None, (
+        "a partially merged device must survive setup"
+    )
 
 
 async def test_migrate_preserves_truly_merged_devices(
