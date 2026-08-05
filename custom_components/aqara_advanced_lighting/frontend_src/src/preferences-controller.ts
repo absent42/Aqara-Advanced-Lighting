@@ -107,10 +107,7 @@ export class PreferencesController implements ReactiveController {
     }
   }
 
-  /**
-   * Load user and global preferences from the API.
-   * Handles one-time localStorage migration when server returns empty data.
-   */
+  /** Load user and global preferences from the API. */
   async load(hass: HomeAssistant): Promise<void> {
     if (!hass) return;
 
@@ -119,34 +116,9 @@ export class PreferencesController implements ReactiveController {
         'GET',
         'aqara_advanced_lighting/user_preferences'
       );
-
-      // One-time migration from localStorage
-      if (
-        prefs.color_history.length === 0 &&
-        Object.keys(prefs.sort_preferences).length === 0
-      ) {
-        const migrated = this._migrateLocalStoragePreferences();
-        if (migrated) {
-          const updated = await hass.callApi<UserPreferences>(
-            'PUT',
-            'aqara_advanced_lighting/user_preferences',
-            migrated as unknown as Record<string, unknown>
-          );
-          // Apply ALL preferences from the server response (not just the migrated fields),
-          // so audio overrides and other settings are restored alongside color/sort history.
-          this._applyUserPreferences(updated);
-          // Clean up localStorage after successful migration
-          localStorage.removeItem('aqara_lighting_color_history');
-          localStorage.removeItem('aqara_lighting_sort_preferences');
-          return;
-        }
-      }
-
       this._applyUserPreferences(prefs);
     } catch (err) {
       console.warn('Failed to load user preferences:', err);
-      // Fall back to localStorage as read-only source if server unavailable
-      this._loadSortPreferencesFromLocalStorage();
     }
 
     // Load global preferences (separate endpoint, not per-user)
@@ -234,51 +206,6 @@ export class PreferencesController implements ReactiveController {
       // willUpdate when selectedEntities / supportedEntities props change.
     }
     this.host.requestUpdate();
-  }
-
-  private _migrateLocalStoragePreferences(): Partial<UserPreferences> | null {
-    const migrated: Partial<UserPreferences> = {};
-    let hasMigrationData = false;
-
-    try {
-      const localColors = localStorage.getItem('aqara_lighting_color_history');
-      if (localColors) {
-        const parsed = JSON.parse(localColors);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          migrated.color_history = parsed;
-          hasMigrationData = true;
-        }
-      }
-    } catch {
-      // Ignore parse errors
-    }
-
-    try {
-      const localSort = localStorage.getItem('aqara_lighting_sort_preferences');
-      if (localSort) {
-        const parsed = JSON.parse(localSort);
-        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-          migrated.sort_preferences = parsed;
-          hasMigrationData = true;
-        }
-      }
-    } catch {
-      // Ignore parse errors
-    }
-
-    return hasMigrationData ? migrated : null;
-  }
-
-  private _loadSortPreferencesFromLocalStorage(): void {
-    try {
-      const stored = localStorage.getItem('aqara_lighting_sort_preferences');
-      if (stored) {
-        this.state.sortPreferences = JSON.parse(stored) as PresetSortPreferences;
-        this.host.requestUpdate();
-      }
-    } catch {
-      // Ignore
-    }
   }
 
   /**
