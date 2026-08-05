@@ -327,8 +327,7 @@ export class ImageColorExtractor extends LitElement {
       display: flex;
     }
 
-    .url-input-row ha-input,
-    .url-input-row ha-textfield {
+    .url-input-row ha-input {
       width: 100%;
     }
 

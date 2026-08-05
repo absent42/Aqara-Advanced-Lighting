@@ -47,6 +47,15 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# HA 2026.8 restricts a device registry entry to a single config entry:
+# identifiers are unique per config entry, and a helper integration may no
+# longer attach its config entry to another integration's device. Probe for
+# the per-config-entry lookup API introduced by that change to pick the
+# device registration strategy. See the legacy migration removal tracker.
+_SINGLE_CONFIG_ENTRY_REGISTRY = hasattr(
+    dr.DeviceRegistry, "async_get_device_by_identifier"
+)
+
 # Characters unsafe for MQTT topic construction (wildcards, separator, null)
 _UNSAFE_TOPIC_NAME = re.compile(r"[/#+\x00]|\.\.")
 
@@ -161,6 +170,10 @@ class MQTTBackend:
                 friendly_name = device_data.get("friendly_name")
                 model_id = device_data.get("model_id")
                 manufacturer = device_data.get("manufacturer")
+                # Zigbee SWBuildID, reported by Z2M as software_build_id.
+                # Absent for some devices, in which case None is passed
+                # through deliberately - see the registration call below.
+                sw_version = device_data.get("software_build_id")
 
                 if not all([ieee_address, friendly_name, model_id]):
                     continue
@@ -216,39 +229,34 @@ class MQTTBackend:
                     model_id,
                 )
 
-                # Register device in HA device registry. We use a two-step
-                # approach: first look for the existing MQTT device by the
-                # identifier Z2M uses, and if found, add our config entry
-                # to it. This avoids a device registry issue where passing
-                # multiple identifiers that match different existing devices
-                # only finds the first match, creating duplicates.
                 z2m_base_topic = self.entry.runtime_data.z2m_base_topic
                 mqtt_identifier = ("mqtt", f"{z2m_base_topic}_{ieee_address}")
                 our_identifier = (DOMAIN, ieee_address)
                 device_registry = dr.async_get(self.hass)
-                existing_mqtt = device_registry.async_get_device(
-                    identifiers={mqtt_identifier},
-                )
-                if existing_mqtt:
-                    # Add our config entry to the existing MQTT device
-                    device_registry.async_get_or_create(
-                        config_entry_id=self.entry.entry_id,
-                        identifiers={mqtt_identifier},
-                    )
-                    # Add our identifier so device triggers can find it
-                    device_registry.async_update_device(
-                        existing_mqtt.id,
-                        merge_identifiers={our_identifier},
-                    )
-                    _LOGGER.debug(
-                        "Merged %s into existing MQTT device %s",
-                        friendly_name,
-                        existing_mqtt.id,
-                    )
-                else:
-                    # MQTT device not found yet - create with both
-                    # identifiers. When MQTT discovers this device later,
-                    # it will find ours by the shared mqtt identifier.
+
+                if _SINGLE_CONFIG_ENTRY_REGISTRY:
+                    # HA 2026.8+: we cannot share the MQTT integration's
+                    # device, so register our own. Both identifiers matter:
+                    #
+                    # our_identifier - device triggers and conditions resolve
+                    #   devices by it. For users upgrading across 2026.8 the
+                    #   previously merged device is split into one device per
+                    #   config entry, and the first re-registration by the
+                    #   owning integration REPLACES the identifiers copied
+                    #   from the pre-migration composite with whatever is
+                    #   passed here, so omitting it would drop it.
+                    # mqtt_identifier - the frontend "Linked Devices" element
+                    #   lists devices sharing an identifier or connection, so
+                    #   keeping it cross-links our device with the MQTT
+                    #   light's device page. Safe to hold alongside the MQTT
+                    #   integration's own copy: identifiers are unique per
+                    #   config entry, not globally.
+                    # sw_version/hw_version are passed explicitly, including
+                    # when None. A device split from a pre-migration composite
+                    # is a copy of it, so it inherits the MQTT device's
+                    # firmware strings; identifier reconciliation does not
+                    # touch them. Passing them here replaces the inherited
+                    # values with ours, or clears them when we have none.
                     device = device_registry.async_get_or_create(
                         config_entry_id=self.entry.entry_id,
                         identifiers={our_identifier, mqtt_identifier},
@@ -256,13 +264,63 @@ class MQTTBackend:
                         manufacturer=manufacturer or "Aqara",
                         model=MODEL_FRIENDLY_NAMES.get(model_id, model_id),
                         model_id=model_id,
+                        sw_version=sw_version,
+                        hw_version=None,
                     )
                     _LOGGER.debug(
-                        "Created new device for %s (%s), MQTT device "
-                        "will merge on discovery",
+                        "Registered device for %s (%s)",
                         friendly_name,
                         device.id,
                     )
+                else:
+                    # Pre-2026.8: merge into the MQTT integration's device so
+                    # our device triggers surface on the light's device page.
+                    # Two-step on purpose: passing multiple identifiers that
+                    # match different existing devices only finds the first
+                    # match, creating duplicates.
+                    existing_mqtt = device_registry.async_get_device(
+                        identifiers={mqtt_identifier},
+                    )
+                    if existing_mqtt:
+                        # Add our config entry to the existing MQTT device
+                        device_registry.async_get_or_create(
+                            config_entry_id=self.entry.entry_id,
+                            identifiers={mqtt_identifier},
+                        )
+                        # Add our identifier so device triggers can find it
+                        device_registry.async_update_device(
+                            existing_mqtt.id,
+                            merge_identifiers={our_identifier},
+                        )
+                        _LOGGER.debug(
+                            "Merged %s into existing MQTT device %s",
+                            friendly_name,
+                            existing_mqtt.id,
+                        )
+                    else:
+                        # MQTT device not found yet - create with both
+                        # identifiers. When MQTT discovers this device later,
+                        # it will find ours by the shared mqtt identifier.
+                        # This device is ours, so report firmware on it. The
+                        # merge branch above deliberately does not: that
+                        # device belongs to the MQTT integration, which owns
+                        # its own firmware data.
+                        device = device_registry.async_get_or_create(
+                            config_entry_id=self.entry.entry_id,
+                            identifiers={our_identifier, mqtt_identifier},
+                            name=friendly_name,
+                            manufacturer=manufacturer or "Aqara",
+                            model=MODEL_FRIENDLY_NAMES.get(model_id, model_id),
+                            model_id=model_id,
+                            sw_version=sw_version,
+                            hw_version=None,
+                        )
+                        _LOGGER.debug(
+                            "Created new device for %s (%s), MQTT device "
+                            "will merge on discovery",
+                            friendly_name,
+                            device.id,
+                        )
 
             # Remove devices that are no longer in the Z2M device list
             self._remove_stale_devices(seen_ieee)
@@ -280,7 +338,12 @@ class MQTTBackend:
             for identifier_domain, identifier_value in device.identifiers:
                 if identifier_domain == DOMAIN:
                     if identifier_value not in seen_ieee:
-                        if len(device.config_entries) > 1:
+                        if _SINGLE_CONFIG_ENTRY_REGISTRY:
+                            # HA 2026.8+: the device is ours alone, so drop it.
+                            device_reg.async_remove_device(device.id)
+                        elif len(device.config_entries) > 1:
+                            # Pre-2026.8: shared with MQTT/ZHA, release only
+                            # our claim so their device survives.
                             device_reg.async_update_device(
                                 device.id,
                                 remove_config_entry_id=self.entry.entry_id,

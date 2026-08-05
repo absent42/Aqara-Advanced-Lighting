@@ -29,12 +29,20 @@ def register_quirks() -> None:
     if _quirks_registered:
         return
 
+    # zha-quirks 2.2 (shipped with HA 2026.8) moved CustomCluster and
+    # QuirkBuilder out of zigpy.quirks.v2; the old paths still work but emit
+    # DeprecationWarnings. Prefer the new locations, fall back for older cores.
+    # See the legacy migration removal tracker.
     try:
-        from zigpy.quirks.v2 import CustomCluster, QuirkBuilder
+        try:
+            from zhaquirks.builder import QuirkBuilder
+            from zhaquirks.clusters import CustomCluster
+        except ImportError:
+            from zigpy.quirks.v2 import CustomCluster, QuirkBuilder
         import zigpy.types as t
     except ImportError:
         _LOGGER.warning(
-            "zigpy.quirks.v2 not available, ZHA quirks will not be registered. "
+            "zigpy/zhaquirks not available, ZHA quirks will not be registered. "
             "Ensure ZHA integration is installed"
         )
         return

@@ -89,16 +89,21 @@ def mock_mqtt_wait():
         yield mock_wait
 
 
-def _make_bridge_devices_payload(*ieee_addresses: str) -> str:
+def _make_bridge_devices_payload(
+    *ieee_addresses: str, software_build_id: str | None = None
+) -> str:
     """Build a bridge/devices JSON payload for the given IEEE addresses."""
     devices = []
     for i, ieee in enumerate(ieee_addresses):
-        devices.append({
+        device: dict[str, str] = {
             "ieee_address": ieee,
             "friendly_name": f"device_{i}",
             "model_id": MODEL_T2,
             "manufacturer": "Aqara",
-        })
+        }
+        if software_build_id is not None:
+            device["software_build_id"] = software_build_id
+        devices.append(device)
     return json.dumps(devices)
 
 
@@ -442,3 +447,225 @@ async def test_repair_timer_cancelled_on_teardown(
     issue_reg = ir.async_get(hass)
     assert issue_reg.async_get_issue(DOMAIN, "z2m_bridge_not_responding") is None, \
         "no repair issue should appear after unload cancels the timer"
+
+
+async def test_device_survives_config_entry_reload(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Setting up the entry again must not delete devices we already own.
+
+    Regression: setup used to prune every device whose sole config entry was
+    ours. From HA 2026.8 a device belongs to exactly one config entry, so that
+    check matched all of our devices and deleted them on every reload, losing
+    area/name customisation and regenerating device IDs.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+    await hass.async_block_till_done()
+
+    dr_instance = dr.async_get(hass)
+    device_before = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    assert device_before is not None, "device A should be registered"
+    device_id_before = device_before.id
+
+    # Give it a user customisation that a delete/recreate cycle would lose
+    dr_instance.async_update_device(device_id_before, name_by_user="Kitchen Bulb")
+
+    with patch(
+        "homeassistant.components.mqtt.async_subscribe",
+        side_effect=AsyncMock(return_value=MagicMock()),
+    ), patch(
+        "homeassistant.components.mqtt.async_publish",
+        new_callable=AsyncMock,
+    ):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    device_after = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    assert device_after is not None, "device must survive an entry reload"
+    assert device_after.id == device_id_before, (
+        "device ID must be stable across reloads so device automations and "
+        "the pre-migration composite link keep resolving"
+    )
+    assert device_after.name_by_user == "Kitchen Bulb", (
+        "user customisation must survive an entry reload"
+    )
+
+
+async def test_single_config_entry_registry_keeps_our_identifier(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """On HA 2026.8+ we register our own device with both identifiers.
+
+    Regression: the pre-2026.8 merge path passed only the mqtt identifier to
+    async_get_or_create and added (DOMAIN, ieee) in a second
+    async_update_device(merge_identifiers=...) call. On 2026.8+ the first
+    re-registration REPLACES the identifiers copied from a split composite
+    device, and merge_identifiers against a synthesized composite is silently
+    dropped -- so (DOMAIN, ieee) disappeared and every device trigger and
+    condition stopped resolving.
+
+    Asserts on the registry calls we make rather than on resulting registry
+    state: this suite runs against a pre-2026.8 core where identifiers are
+    still globally unique, so async_get_or_create would match the MQTT
+    integration's device by the shared mqtt identifier and merge into it.
+    Per-config-entry uniqueness cannot be simulated by patching the flag.
+    """
+    mqtt_config_entry = MockConfigEntry(
+        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
+    )
+    mqtt_config_entry.add_to_hass(hass)
+
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    # The MQTT integration already owns a device for this bulb
+    dr_instance = dr.async_get(hass)
+    mqtt_identifier = ("mqtt", f"zigbee2mqtt_{IEEE_A}")
+    dr_instance.async_get_or_create(
+        config_entry_id=mqtt_config_entry.entry_id,
+        identifiers={mqtt_identifier},
+        name="MQTT Light",
+    )
+
+    registry_cls = type(dr_instance)
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        True,
+    ), patch.object(
+        registry_cls, "async_get_or_create", autospec=True,
+        side_effect=registry_cls.async_get_or_create,
+    ) as spy_create, patch.object(
+        registry_cls, "async_update_device", autospec=True,
+        side_effect=registry_cls.async_update_device,
+    ) as spy_update:
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    our_creates = [
+        call for call in spy_create.call_args_list
+        if call.kwargs.get("config_entry_id") == entry.entry_id
+    ]
+    assert our_creates, "we must register a device under our own config entry"
+    identifiers = our_creates[-1].kwargs["identifiers"]
+
+    assert (DOMAIN, IEEE_A) in identifiers, (
+        "our device must carry (DOMAIN, ieee) or device triggers and "
+        "conditions cannot resolve it"
+    )
+    assert mqtt_identifier in identifiers, (
+        "our device must keep the mqtt identifier so the frontend "
+        "'Linked Devices' element cross-links it with the MQTT light; "
+        "linking is by shared identifier or connection"
+    )
+
+    # We must not reach into the MQTT integration's device
+    assert not [
+        call for call in spy_update.call_args_list
+        if "merge_identifiers" in call.kwargs
+    ], (
+        "helper integrations must not mutate another integration's device "
+        "on HA 2026.8+; merge_identifiers against a synthesized composite "
+        "is silently dropped anyway"
+    )
+
+
+async def test_firmware_version_reported_and_inherited_value_cleared(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """We set sw_version from Z2M and clear firmware we do not own.
+
+    A device split from a pre-migration composite is a copy of it, so it
+    inherits the MQTT device's sw_version/hw_version and identifier
+    reconciliation never touches them. Passing both explicitly - including
+    None - replaces or clears the inherited strings instead of leaving a
+    stale snapshot of another integration's data on our device page.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    # Stand in for a device carrying firmware strings inherited from a split
+    dr_instance = dr.async_get(hass)
+    stale = dr_instance.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, IEEE_A)},
+        name="device_0",
+        sw_version="inherited-from-mqtt",
+        hw_version="inherited-hw",
+    )
+    assert stale.sw_version == "inherited-from-mqtt"
+
+    _fire_bridge_devices(
+        subscribe_calls,
+        _make_bridge_devices_payload(IEEE_A, software_build_id="0122052017"),
+    )
+    await hass.async_block_till_done()
+
+    device = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    assert device is not None
+    assert device.sw_version == "0122052017", (
+        "sw_version must come from the Z2M software_build_id, replacing any "
+        "value inherited from a composite split"
+    )
+    assert device.hw_version is None, (
+        "we have no hardware version, so an inherited one must be cleared "
+        "rather than left showing another integration's data"
+    )
+
+
+async def test_firmware_version_absent_from_payload_clears_inherited(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Z2M omitting software_build_id must clear, not keep, inherited firmware."""
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    dr_instance.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, IEEE_A)},
+        name="device_0",
+        sw_version="inherited-from-mqtt",
+    )
+
+    # No software_build_id in the payload
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+    await hass.async_block_till_done()
+
+    device = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    assert device is not None
+    assert device.sw_version is None, (
+        "an absent software_build_id must clear the inherited value, not "
+        "leave another integration's firmware string in place"
+    )
