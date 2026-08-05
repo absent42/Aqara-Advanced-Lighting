@@ -55,6 +55,14 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# HA 2026.8 restricts a device registry entry to a single config entry and
+# makes identifiers unique per config entry, so identifier lookups must name
+# the owning entry. Probe for the API introduced by that change.
+# See the legacy migration removal tracker.
+_SINGLE_CONFIG_ENTRY_REGISTRY = hasattr(
+    dr.DeviceRegistry, "async_get_device_by_identifier"
+)
+
 # Aqara manufacturer-specific Zigbee cluster ID
 CLUSTER_MANU_SPECIFIC_LUMI = 0xFCC0
 
@@ -240,6 +248,11 @@ class ZHABackend:
 
             # Register in HA device registry
             device_registry = dr.async_get(self.hass)
+            # sw_version is passed explicitly, including when None. A device
+            # split from a pre-migration composite is a copy of it, so it
+            # inherits ZHA's firmware string; identifier reconciliation does
+            # not touch it. Passing it here keeps ours in step with ZHA's,
+            # which sources the same zha_device.firmware_version.
             device_registry.async_get_or_create(
                 config_entry_id=self.entry.entry_id,
                 identifiers={(DOMAIN, ieee_str)},
@@ -248,6 +261,7 @@ class ZHABackend:
                 manufacturer=device.manufacturer or "Aqara",
                 model=MODEL_FRIENDLY_NAMES.get(model_id, model_id),
                 model_id=model_id,
+                sw_version=getattr(device, "firmware_version", None),
             )
 
             _LOGGER.debug(
@@ -281,6 +295,16 @@ class ZHABackend:
             )
             self.hass.async_create_task(self._async_retry_entity_mapping())
 
+    def _zha_config_entry_id(self) -> str | None:
+        """Return the ZHA config entry id, or None if ZHA is not set up.
+
+        Needed on HA 2026.8+ where device identifiers are unique per config
+        entry, so looking a ZHA device up by identifier requires naming the
+        entry that owns it.
+        """
+        zha_entries = self.hass.config_entries.async_entries("zha")
+        return zha_entries[0].entry_id if zha_entries else None
+
     def _remove_stale_devices(self, seen_ieee: set[str]) -> None:
         """Remove devices no longer present in ZHA from the HA device registry."""
         device_reg = dr.async_get(self.hass)
@@ -288,7 +312,12 @@ class ZHABackend:
             for identifier_domain, identifier_value in device.identifiers:
                 if identifier_domain == DOMAIN:
                     if identifier_value not in seen_ieee:
-                        if len(device.config_entries) > 1:
+                        if _SINGLE_CONFIG_ENTRY_REGISTRY:
+                            # HA 2026.8+: the device is ours alone, so drop it.
+                            device_reg.async_remove_device(device.id)
+                        elif len(device.config_entries) > 1:
+                            # Pre-2026.8: shared with ZHA, release only our
+                            # claim so ZHA's device survives.
                             device_reg.async_update_device(
                                 device.id,
                                 remove_config_entry_id=self.entry.entry_id,
@@ -306,9 +335,20 @@ class ZHABackend:
         self._entity_to_ieee.clear()
         mapped_count = 0
 
+        zha_entry_id = self._zha_config_entry_id()
+
         for ieee_str, aqara_device in self.entry.runtime_data.aqara_devices.items():
             # ZHA registers devices with ("zha", ieee_str) identifiers
-            ha_device = dev_reg.async_get_device(identifiers={("zha", ieee_str)})
+            if _SINGLE_CONFIG_ENTRY_REGISTRY and zha_entry_id is not None:
+                # Identifiers are unique per config entry, so the lookup must
+                # name ZHA's entry rather than searching globally.
+                ha_device = dev_reg.async_get_device_by_identifier(
+                    ("zha", ieee_str), zha_entry_id
+                )
+            else:
+                ha_device = dev_reg.async_get_device(
+                    identifiers={("zha", ieee_str)}
+                )
             if not ha_device:
                 _LOGGER.debug(
                     "No HA device found for ZHA device %s (%s)",

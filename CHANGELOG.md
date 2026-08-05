@@ -2,6 +2,50 @@
 
 All notable changes to the Aqara Advanced Lighting integration will be documented in this file.
 
+## [1.3.2] - 2026-08-05
+
+### Minimum Home Assistant version is now 2026.6
+
+The integration now requires Home Assistant 2026.6 or later. Earlier versions are no longer supported.
+
+### Internal
+
+  - Dropped the frontend compatibility shims for Home Assistant releases older than 2026.6: text fields render `ha-input` directly rather than detecting it and falling back to `ha-textfield`, and the panel header uses the `--ha-sidebar-width` sidebar token without the older `--mdc-drawer-width` fallback. No visible change on supported versions.
+  - Removed the remaining v1.3.0 preference conversions, which have had four months to run. If you have not opened the integration since April 2026, two per-user audio override settings (silence behaviour and brightness response) revert to their defaults, and a favorites sort still set to "Oldest first" keeps that ordering but shows no drag handles until you switch it to "Custom".
+  - Removed the browser-storage import added in February 2026, which moved colour history and sort preferences out of the browser and onto the server the first time you opened the panel. This ran per browser rather than per install, so a browser you have not opened the panel in since then will start from defaults instead of importing what it had saved. Preferences already on the server are unaffected, including in that browser.
+
+### Removed: legacy audio preset conversion
+
+**Breaking for old preset export files.** The conversion for two audio fields renamed in v1.3.0 has been removed. Presets stored in Home Assistant were converted automatically when you first ran v1.3.0 and are unaffected — this only concerns preset JSON files exported before April 2026.
+
+If you import an export file created before then, two dynamic scene settings are silently dropped and fall back to defaults:
+
+  - `audio_silence_degradation` — the imported scene uses the default silence behaviour ("slow cycle") regardless of the saved value
+  - `audio_brightness_response` — the imported scene uses the default brightness curve (linear, 30-100) regardless of the saved value
+
+Every other setting in the file imports normally. Re-save the affected scenes after importing to set these two the way you want. Export files created by v1.3.0 or later are unaffected.
+
+### Home Assistant 2026.8 compatibility
+
+Home Assistant 2026.8 restricts every device registry entry to a single config entry. Integrations can no longer attach themselves to another integration's device, which changes how this integration appears alongside your lights.
+
+**What you will see:** each Aqara light now has two device pages — the one owned by Zigbee2MQTT (or ZHA) carrying the light entity, and one owned by Aqara Advanced Lighting carrying this integration's device triggers and conditions. Home Assistant's "Linked Devices" element on each device page cross-links the two. Existing automations continue to work; Home Assistant resolves references to the old combined device across both.
+
+Two consequences are inherent to the Home Assistant change and cannot be worked around by this integration: areas must be assigned to each device separately, and when building a new device automation you must pick the Aqara Advanced Lighting device to reach our triggers and conditions.
+
+### Fixed
+
+  - Devices were deleted and re-created on every setup under 2026.8. Setup pruned any device whose only owning config entry was ours — which, once devices are single-entry, is all of them. This lost area assignments and custom names, regenerated device IDs, and detached each device from the record Home Assistant uses to keep existing automations resolving. The one-time v1.2 to v1.3 cleanup is unaffected and still runs.
+  - Device triggers and conditions stopped resolving for Zigbee2MQTT users on 2026.8. Our device identifier was dropped during the registry migration, leaving triggers and conditions with no device to match. Devices are now registered with both their Aqara and Zigbee2MQTT identifiers, which also restores the "Linked Devices" cross-link.
+
+### Other 2026.8 compatibility
+
+  - ZHA quirk registration now imports `CustomCluster` and `QuirkBuilder` from `zhaquirks` rather than the deprecated `zigpy.quirks.v2` paths, which warn on the zha-quirks 2.2 shipped with 2026.8. Same classes, no behaviour change.
+  - Stale device cleanup and ZHA device lookups use the single-config-entry registry APIs on 2026.8+.
+  - Device pages now show the bulb's own firmware version. Devices separated by the 2026.8 migration kept a copy of the Zigbee2MQTT or ZHA device's firmware string, which never updated; that value is now replaced with ours, or cleared when the bulb does not report one.
+
+Pre-2026.8 cores keep the previous merged-device behaviour; the integration detects which model the running core uses.
+
 ## [1.3.0] - 2026-04-27
 
 ### What's New

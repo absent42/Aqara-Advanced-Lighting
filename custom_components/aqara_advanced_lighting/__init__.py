@@ -332,43 +332,14 @@ async def async_setup_entry(
     # Store runtime data in config entry
     entry.runtime_data = runtime_data
 
-    # Migrate old standalone devices: remove any device where our config
-    # entry is the SOLE config entry. A truly merged device (shared with
-    # MQTT or ZHA) will have multiple config entries and is preserved.
-    # Our backends will re-register devices on the next Z2M/ZHA update,
-    # this time merging correctly with the existing MQTT/ZHA device.
-    device_registry = dr.async_get(hass)
-    devices_for_entry = dr.async_entries_for_config_entry(
-        device_registry, entry.entry_id
-    )
-    _LOGGER.debug(
-        "Migration check: found %d devices for config entry %s",
-        len(devices_for_entry),
-        entry.entry_id,
-    )
-    for device in devices_for_entry:
-        is_sole_config_entry = (
-            len(device.config_entries) == 1
-            and entry.entry_id in device.config_entries
-        )
-        if is_sole_config_entry:
-            _LOGGER.info(
-                "Removing standalone device %s (%s) to allow merging "
-                "with MQTT/ZHA device (identifiers: %s)",
-                device.name,
-                device.id,
-                device.identifiers,
-            )
-            device_registry.async_remove_device(device.id)
-        else:
-            _LOGGER.debug(
-                "Keeping merged device %s (%s) - shared with %d config "
-                "entries (identifiers: %s)",
-                device.name,
-                device.id,
-                len(device.config_entries),
-                device.identifiers,
-            )
+    # NOTE: Do not prune devices here based on how many config entries own
+    # them. From HA 2026.8 a device belongs to exactly one config entry, so
+    # every device we own is "sole entry" by definition and such a check
+    # deletes all of them on every setup. That loses area assignments and
+    # user-set names, regenerates device IDs, and detaches the device from
+    # the pre-migration composite that keeps existing device automations
+    # resolving to us. The one-time minor_version < 3 cleanup in
+    # async_migrate_entry handles legacy standalone devices instead.
 
     _LOGGER.info(
         "Setting up Aqara Advanced Lighting (backend: %s%s)",

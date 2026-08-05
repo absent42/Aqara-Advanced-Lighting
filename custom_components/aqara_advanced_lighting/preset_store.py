@@ -120,58 +120,6 @@ _ALLOWED_FIELDS: dict[str, set[str]] = {
     },
 }
 
-SILENCE_MIGRATION_FLAG = "_migrated_silence_v1"
-
-
-def _migrate_silence_degradation_to_behavior(preset: dict[str, Any]) -> dict[str, Any]:
-    """Migrate audio_silence_degradation (bool) to audio_silence_behavior (str).
-
-    Rewrites the stored preset in-place, removing the old key.
-    Skips presets that already have the new key or the migration flag.
-    """
-    if preset.get(SILENCE_MIGRATION_FLAG):
-        return preset
-
-    if "audio_silence_degradation" not in preset:
-        return preset
-
-    old_val = preset.pop("audio_silence_degradation")
-    preset["audio_silence_behavior"] = "slow_cycle" if old_val else "hold"
-    preset[SILENCE_MIGRATION_FLAG] = True
-    _LOGGER.debug(
-        "Migrated preset '%s' audio_silence_degradation=%s to audio_silence_behavior='%s'",
-        preset.get("name", "unknown"),
-        old_val,
-        preset["audio_silence_behavior"],
-    )
-    return preset
-
-
-BRIGHTNESS_RESPONSE_MIGRATION_FLAG = "_migrated_brightness_response_v1"
-
-
-def _migrate_brightness_response_to_curve(preset: dict[str, Any]) -> dict[str, Any]:
-    """Migrate audio_brightness_response (bool) to curve + min/max."""
-    if preset.get(BRIGHTNESS_RESPONSE_MIGRATION_FLAG):
-        return preset
-    if "audio_brightness_response" not in preset:
-        return preset
-
-    old_val = preset.pop("audio_brightness_response")
-    if old_val:
-        preset["audio_brightness_curve"] = "linear"
-        preset["audio_brightness_min"] = 30
-        preset["audio_brightness_max"] = 100
-    else:
-        preset["audio_brightness_curve"] = None
-    preset[BRIGHTNESS_RESPONSE_MIGRATION_FLAG] = True
-    _LOGGER.debug(
-        "Migrated preset '%s' audio_brightness_response=%s to curve params",
-        preset.get("name", "unknown"), old_val,
-    )
-    return preset
-
-
 class UserEffectPreset(TypedDict):
     """User-defined effect preset."""
 
@@ -326,29 +274,6 @@ class PresetStore(BaseStore[PresetsData]):
                 "segment_sequence_presets": data.get("segment_sequence_presets", []),
                 "dynamic_scene_presets": data.get("dynamic_scene_presets", []),
             }
-
-            needs_save = False
-
-            # Migrate audio_silence_degradation -> audio_silence_behavior
-            if self._data["dynamic_scene_presets"]:
-                for i, preset in enumerate(self._data["dynamic_scene_presets"]):
-                    migrated = _migrate_silence_degradation_to_behavior(preset)
-                    if migrated.get(SILENCE_MIGRATION_FLAG):
-                        self._data["dynamic_scene_presets"][i] = migrated
-                        needs_save = True
-
-            # Migrate audio_brightness_response -> audio_brightness_curve/min/max
-            if self._data["dynamic_scene_presets"]:
-                for i, preset in enumerate(self._data["dynamic_scene_presets"]):
-                    migrated = _migrate_brightness_response_to_curve(preset)
-                    if migrated.get(BRIGHTNESS_RESPONSE_MIGRATION_FLAG):
-                        self._data["dynamic_scene_presets"][i] = migrated
-                        needs_save = True
-
-            # Save migrated presets
-            if needs_save:
-                _LOGGER.info("Migrated user presets")
-                await self.async_save()
 
         _LOGGER.debug(
             "Loaded user presets: %d effects, %d patterns, %d CCT sequences, %d segment sequences, %d dynamic scenes",
