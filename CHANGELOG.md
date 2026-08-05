@@ -17,6 +17,11 @@ Two consequences are inherent to the Home Assistant change and cannot be worked 
   - Devices were deleted and re-created on every setup under 2026.8. Setup pruned any device whose only owning config entry was ours — which, once devices are single-entry, is all of them. This lost area assignments and custom names, regenerated device IDs, and detached each device from the record Home Assistant uses to keep existing automations resolving. The one-time v1.2 to v1.3 cleanup is unaffected and still runs.
   - Device triggers and conditions stopped resolving for Zigbee2MQTT users on 2026.8. Our device identifier was dropped during the registry migration, leaving triggers and conditions with no device to match. Devices are now registered with both their Aqara and Zigbee2MQTT identifiers, which also restores the "Linked Devices" cross-link.
 
+### Other 2026.8 compatibility
+
+  - ZHA quirk registration now imports `CustomCluster` and `QuirkBuilder` from `zhaquirks` rather than the deprecated `zigpy.quirks.v2` paths, which warn on the zha-quirks 2.2 shipped with 2026.8. Same classes, no behaviour change.
+  - Stale device cleanup and ZHA device lookups use the single-config-entry registry APIs on 2026.8+.
+
 Pre-2026.8 cores keep the previous merged-device behaviour; the integration detects which model the running core uses.
 
 ## [1.3.0] - 2026-04-27

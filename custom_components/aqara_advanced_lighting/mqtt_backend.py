@@ -320,7 +320,12 @@ class MQTTBackend:
             for identifier_domain, identifier_value in device.identifiers:
                 if identifier_domain == DOMAIN:
                     if identifier_value not in seen_ieee:
-                        if len(device.config_entries) > 1:
+                        if _SINGLE_CONFIG_ENTRY_REGISTRY:
+                            # HA 2026.8+: the device is ours alone, so drop it.
+                            device_reg.async_remove_device(device.id)
+                        elif len(device.config_entries) > 1:
+                            # Pre-2026.8: shared with MQTT/ZHA, release only
+                            # our claim so their device survives.
                             device_reg.async_update_device(
                                 device.id,
                                 remove_config_entry_id=self.entry.entry_id,
