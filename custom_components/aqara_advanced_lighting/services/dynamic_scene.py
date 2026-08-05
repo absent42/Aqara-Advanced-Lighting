@@ -43,38 +43,6 @@ from homeassistant.const import ATTR_ENTITY_ID
 _LOGGER = logging.getLogger(__name__)
 
 
-def _migrate_silence_param(data: dict) -> str:
-    """Migrate audio_silence_degradation (bool) to audio_silence_behavior (str).
-
-    Supports both old presets with the boolean field and new presets
-    with the string enum.
-    """
-    # New field takes precedence
-    if "audio_silence_behavior" in data:
-        return data["audio_silence_behavior"]
-    # Legacy migration
-    old_val = data.get("audio_silence_degradation", True)
-    return "slow_cycle" if old_val else "hold"
-
-
-def _migrate_brightness_response(data: dict) -> tuple[str | None, int, int]:
-    """Migrate audio_brightness_response (bool) to curve + min/max.
-
-    Returns (curve, min, max).
-    """
-    # New fields take precedence
-    if "audio_brightness_curve" in data:
-        return (
-            data["audio_brightness_curve"],
-            data.get("audio_brightness_min", 30),
-            data.get("audio_brightness_max", 100),
-        )
-    # Legacy migration
-    if data.get("audio_brightness_response", True):
-        return ("linear", 30, 100)  # Matches old max(0.3, min(1.0, energy))
-    return (None, 30, 100)  # Disabled
-
-
 def _resolve_audio_entity_fallback(
     preset: dict[str, Any], default_audio_entity: str
 ) -> str | None:
@@ -181,14 +149,16 @@ async def handle_start_dynamic_scene(hass: HomeAssistant, call: ServiceCall) -> 
             end_behavior=preset["end_behavior"],
             audio_entity=_resolve_audio_entity_fallback(preset, default_audio_entity),
             audio_sensitivity=preset.get("audio_sensitivity", DEFAULT_AUDIO_SENSITIVITY),
-            audio_brightness_curve=_migrate_brightness_response(preset)[0],
-            audio_brightness_min=_migrate_brightness_response(preset)[1],
-            audio_brightness_max=_migrate_brightness_response(preset)[2],
+            audio_brightness_curve=preset.get("audio_brightness_curve", "linear"),
+            audio_brightness_min=preset.get("audio_brightness_min", 30),
+            audio_brightness_max=preset.get("audio_brightness_max", 100),
             audio_color_advance=preset.get("audio_color_advance", AUDIO_COLOR_ADVANCE_ON_ONSET),
             audio_transition_speed=preset.get("audio_transition_speed", DEFAULT_AUDIO_TRANSITION_SPEED),
             audio_detection_mode=preset.get("audio_detection_mode", DEFAULT_AUDIO_DETECTION_MODE),
             audio_frequency_zone=preset.get("audio_frequency_zone", DEFAULT_AUDIO_FREQUENCY_ZONE),
-            audio_silence_behavior=_migrate_silence_param(preset),
+            audio_silence_behavior=preset.get(
+                "audio_silence_behavior", AUDIO_SILENCE_SLOW_CYCLE
+            ),
             audio_prediction_aggressiveness=preset.get("audio_prediction_aggressiveness", DEFAULT_AUDIO_PREDICTION_AGGRESSIVENESS),
             audio_latency_compensation_ms=preset.get("audio_latency_compensation_ms", DEFAULT_LATENCY_COMPENSATION_MS),
             audio_color_by_frequency=preset.get("audio_color_by_frequency", False),

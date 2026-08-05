@@ -4,6 +4,21 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 
 ## [1.3.2] - 2026-08-05
 
+### Minimum Home Assistant version is now 2026.6
+
+The integration now requires Home Assistant 2026.6 or later. Earlier versions are no longer supported.
+
+### Removed: legacy audio preset conversion
+
+**Breaking for old preset export files.** The conversion for two audio fields renamed in v1.3.0 has been removed. Presets stored in Home Assistant were converted automatically when you first ran v1.3.0 and are unaffected — this only concerns preset JSON files exported before April 2026.
+
+If you import an export file created before then, two dynamic scene settings are silently dropped and fall back to defaults:
+
+  - `audio_silence_degradation` — the imported scene uses the default silence behaviour ("slow cycle") regardless of the saved value
+  - `audio_brightness_response` — the imported scene uses the default brightness curve (linear, 30-100) regardless of the saved value
+
+Every other setting in the file imports normally. Re-save the affected scenes after importing to set these two the way you want. Export files created by v1.3.0 or later are unaffected.
+
 ### Home Assistant 2026.8 compatibility
 
 Home Assistant 2026.8 restricts every device registry entry to a single config entry. Integrations can no longer attach themselves to another integration's device, which changes how this integration appears alongside your lights.
