@@ -2,6 +2,23 @@
 
 All notable changes to the Aqara Advanced Lighting integration will be documented in this file.
 
+## [1.3.2] - 2026-08-05
+
+### Home Assistant 2026.8 compatibility
+
+Home Assistant 2026.8 restricts every device registry entry to a single config entry. Integrations can no longer attach themselves to another integration's device, which changes how this integration appears alongside your lights.
+
+**What you will see:** each Aqara light now has two device pages — the one owned by Zigbee2MQTT (or ZHA) carrying the light entity, and one owned by Aqara Advanced Lighting carrying this integration's device triggers and conditions. Home Assistant's "Linked Devices" element on each device page cross-links the two. Existing automations continue to work; Home Assistant resolves references to the old combined device across both.
+
+Two consequences are inherent to the Home Assistant change and cannot be worked around by this integration: areas must be assigned to each device separately, and when building a new device automation you must pick the Aqara Advanced Lighting device to reach our triggers and conditions.
+
+### Fixed
+
+  - Devices were deleted and re-created on every setup under 2026.8. Setup pruned any device whose only owning config entry was ours — which, once devices are single-entry, is all of them. This lost area assignments and custom names, regenerated device IDs, and detached each device from the record Home Assistant uses to keep existing automations resolving. The one-time v1.2 to v1.3 cleanup is unaffected and still runs.
+  - Device triggers and conditions stopped resolving for Zigbee2MQTT users on 2026.8. Our device identifier was dropped during the registry migration, leaving triggers and conditions with no device to match. Devices are now registered with both their Aqara and Zigbee2MQTT identifiers, which also restores the "Linked Devices" cross-link.
+
+Pre-2026.8 cores keep the previous merged-device behaviour; the integration detects which model the running core uses.
+
 ## [1.3.0] - 2026-04-27
 
 ### What's New

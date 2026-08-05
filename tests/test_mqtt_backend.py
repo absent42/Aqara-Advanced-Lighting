@@ -504,7 +504,7 @@ async def test_single_config_entry_registry_keeps_our_identifier(
     mock_segment_sequence_manager,
     mock_mqtt_wait,
 ) -> None:
-    """On HA 2026.8+ we register our own device carrying our identifier.
+    """On HA 2026.8+ we register our own device with both identifiers.
 
     Regression: the pre-2026.8 merge path passed only the mqtt identifier to
     async_get_or_create and added (DOMAIN, ieee) in a second
@@ -513,6 +513,12 @@ async def test_single_config_entry_registry_keeps_our_identifier(
     device, and merge_identifiers against a synthesized composite is silently
     dropped -- so (DOMAIN, ieee) disappeared and every device trigger and
     condition stopped resolving.
+
+    Asserts on the registry calls we make rather than on resulting registry
+    state: this suite runs against a pre-2026.8 core where identifiers are
+    still globally unique, so async_get_or_create would match the MQTT
+    integration's device by the shared mqtt identifier and merge into it.
+    Per-config-entry uniqueness cannot be simulated by patching the flag.
     """
     mqtt_config_entry = MockConfigEntry(
         domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
@@ -527,32 +533,50 @@ async def test_single_config_entry_registry_keeps_our_identifier(
     # The MQTT integration already owns a device for this bulb
     dr_instance = dr.async_get(hass)
     mqtt_identifier = ("mqtt", f"zigbee2mqtt_{IEEE_A}")
-    mqtt_device = dr_instance.async_get_or_create(
+    dr_instance.async_get_or_create(
         config_entry_id=mqtt_config_entry.entry_id,
         identifiers={mqtt_identifier},
         name="MQTT Light",
     )
 
+    registry_cls = type(dr_instance)
     with patch(
         "custom_components.aqara_advanced_lighting.mqtt_backend."
         "_SINGLE_CONFIG_ENTRY_REGISTRY",
         True,
-    ):
+    ), patch.object(
+        registry_cls, "async_get_or_create", autospec=True,
+        side_effect=registry_cls.async_get_or_create,
+    ) as spy_create, patch.object(
+        registry_cls, "async_update_device", autospec=True,
+        side_effect=registry_cls.async_update_device,
+    ) as spy_update:
         _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
         await hass.async_block_till_done()
 
-    our_devices = dr.async_entries_for_config_entry(dr_instance, entry.entry_id)
-    our_identifiers = {
-        ident for dev in our_devices for ident in dev.identifiers
-    }
-    assert (DOMAIN, IEEE_A) in our_identifiers, (
+    our_creates = [
+        call for call in spy_create.call_args_list
+        if call.kwargs.get("config_entry_id") == entry.entry_id
+    ]
+    assert our_creates, "we must register a device under our own config entry"
+    identifiers = our_creates[-1].kwargs["identifiers"]
+
+    assert (DOMAIN, IEEE_A) in identifiers, (
         "our device must carry (DOMAIN, ieee) or device triggers and "
         "conditions cannot resolve it"
     )
+    assert mqtt_identifier in identifiers, (
+        "our device must keep the mqtt identifier so the frontend "
+        "'Linked Devices' element cross-links it with the MQTT light; "
+        "linking is by shared identifier or connection"
+    )
 
-    # We must not have attached ourselves to the MQTT integration's device
-    mqtt_device_after = dr_instance.async_get(mqtt_device.id)
-    assert entry.entry_id not in mqtt_device_after.config_entries, (
-        "helper integrations must not add their config entry to another "
-        "integration's device on HA 2026.8+"
+    # We must not reach into the MQTT integration's device
+    assert not [
+        call for call in spy_update.call_args_list
+        if "merge_identifiers" in call.kwargs
+    ], (
+        "helper integrations must not mutate another integration's device "
+        "on HA 2026.8+; merge_identifiers against a synthesized composite "
+        "is silently dropped anyway"
     )

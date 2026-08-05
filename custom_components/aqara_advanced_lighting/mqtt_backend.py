@@ -232,18 +232,24 @@ class MQTTBackend:
 
                 if _SINGLE_CONFIG_ENTRY_REGISTRY:
                     # HA 2026.8+: we cannot share the MQTT integration's
-                    # device, so register our own keyed on our identifier
-                    # alone. Passing our identifier explicitly matters for
-                    # users upgrading across 2026.8: their previously merged
-                    # device is split into one device per config entry, and
-                    # the first re-registration by the owning integration
-                    # REPLACES the identifiers copied from the pre-migration
-                    # composite with whatever is passed here. Omitting
-                    # our_identifier would drop it, and device triggers and
-                    # conditions resolve devices by it.
+                    # device, so register our own. Both identifiers matter:
+                    #
+                    # our_identifier - device triggers and conditions resolve
+                    #   devices by it. For users upgrading across 2026.8 the
+                    #   previously merged device is split into one device per
+                    #   config entry, and the first re-registration by the
+                    #   owning integration REPLACES the identifiers copied
+                    #   from the pre-migration composite with whatever is
+                    #   passed here, so omitting it would drop it.
+                    # mqtt_identifier - the frontend "Linked Devices" element
+                    #   lists devices sharing an identifier or connection, so
+                    #   keeping it cross-links our device with the MQTT
+                    #   light's device page. Safe to hold alongside the MQTT
+                    #   integration's own copy: identifiers are unique per
+                    #   config entry, not globally.
                     device = device_registry.async_get_or_create(
                         config_entry_id=self.entry.entry_id,
-                        identifiers={our_identifier},
+                        identifiers={our_identifier, mqtt_identifier},
                         name=friendly_name,
                         manufacturer=manufacturer or "Aqara",
                         model=MODEL_FRIENDLY_NAMES.get(model_id, model_id),
