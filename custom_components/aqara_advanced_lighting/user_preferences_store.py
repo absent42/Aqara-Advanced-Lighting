@@ -132,34 +132,6 @@ class UserPreferencesStore(BaseStore[dict[str, UserPreferences]]):
         else:
             self._data = {}
             self._global_data = {**DEFAULT_GLOBAL_PREFERENCES}
-        # Migrate legacy audio preference fields
-        prefs_needs_save = False
-        for user_id, prefs in self._data.items():
-            if user_id == GLOBAL_PREFERENCES_KEY:
-                continue
-            if not isinstance(prefs, dict):
-                continue
-            # Migrate audio_override_silence_degradation -> audio_override_silence_behavior
-            if "audio_override_silence_degradation" in prefs:
-                old_val = prefs.pop("audio_override_silence_degradation")
-                prefs["audio_override_silence_behavior"] = "slow_cycle" if old_val else "hold"
-                prefs_needs_save = True
-            # Migrate audio_override_brightness_response -> audio_override_brightness_curve/min/max
-            if "audio_override_brightness_response" in prefs:
-                old_val = prefs.pop("audio_override_brightness_response")
-                if old_val:
-                    prefs["audio_override_brightness_curve"] = "linear"
-                    prefs["audio_override_brightness_min"] = 30
-                    prefs["audio_override_brightness_max"] = 100
-                else:
-                    prefs["audio_override_brightness_curve"] = None
-                    prefs["audio_override_brightness_min"] = 30
-                    prefs["audio_override_brightness_max"] = 100
-                prefs_needs_save = True
-        if prefs_needs_save:
-            _LOGGER.info("Migrated user preferences: silence_degradation + brightness_response")
-            await self.async_save()
-
         _LOGGER.debug("Loaded preferences for %d users", len(self._data))
 
     async def async_save(self) -> None:

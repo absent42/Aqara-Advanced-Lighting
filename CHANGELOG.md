@@ -11,6 +11,7 @@ The integration now requires Home Assistant 2026.6 or later. Earlier versions ar
 ### Internal
 
   - Dropped the frontend compatibility shims for Home Assistant releases older than 2026.6: text fields render `ha-input` directly rather than detecting it and falling back to `ha-textfield`, and the panel header uses the `--ha-sidebar-width` sidebar token without the older `--mdc-drawer-width` fallback. No visible change on supported versions.
+  - Removed the remaining v1.3.0 preference conversions, which have had four months to run. If you have not opened the integration since April 2026, two per-user audio override settings (silence behaviour and brightness response) revert to their defaults, and a favorites sort still set to "Oldest first" keeps that ordering but shows no drag handles until you switch it to "Custom".
 
 ### Removed: legacy audio preset conversion
 

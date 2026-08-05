@@ -183,10 +183,6 @@ export class PreferencesController implements ReactiveController {
       console.warn('Failed to load global preferences:', err);
     }
 
-    // Run one-time migration for the favorites sort preference.
-    // Idempotent — the migration is a no-op once the value is already 'custom'.
-    this._maybeMigrateFavoritesSort(hass);
-
     this.host.requestUpdate();
   }
 
@@ -366,35 +362,6 @@ export class PreferencesController implements ReactiveController {
     if (stored) return stored;
     if (sectionId === 'favorite_presets') return 'custom';
     return 'name-asc';
-  }
-
-  /**
-   * One-time migration: rewrite a stored `'date-old'` favorites sort to `'custom'`.
-   * `'date-old'` already returned array order for favorites (favorites have no
-   * `created_at`), so this is identical underlying behavior with a clearer label
-   * that unlocks drag handles. Idempotent: a second call after migration is a no-op
-   * because the value is already `'custom'`. If the PUT fails, retries on next load.
-   */
-  private _maybeMigrateFavoritesSort(hass: HomeAssistant): void {
-    if (this.state.sortPreferences?.favorite_presets !== 'date-old') return;
-
-    const next: PresetSortPreferences = {
-      ...this.state.sortPreferences,
-      favorite_presets: 'custom' as PresetSortOption,
-    };
-    this.state.sortPreferences = next;
-    this.host.requestUpdate();
-
-    // Persist immediately so the migration sticks across reloads.
-    // Failure leaves the in-memory value as 'custom' for this session and retries on
-    // next load (the on-disk value is still 'date-old' until a successful PUT).
-    hass.callApi<UserPreferences>(
-      'PUT',
-      'aqara_advanced_lighting/user_preferences',
-      { sort_preferences: next } as unknown as Record<string, unknown>,
-    ).catch(err => {
-      console.warn('Favorites sort migration to custom failed; will retry on next load', err);
-    });
   }
 
   setSortPreference(sectionId: string, value: PresetSortOption, hass: HomeAssistant): void {
