@@ -12,10 +12,8 @@ export const scaffoldStyles = css`
     border-bottom: 1px solid var(--divider-color);
     position: fixed;
     top: 0;
-    /* HA 2026.6 renamed the sidebar token --mdc-drawer-width -> --ha-sidebar-width.
-       Chained fallback covers both: new token wins on 2026.6+, old token covers
-       2026.3-2026.5 (min supported), 0px for narrow/neither. */
-    left: var(--ha-sidebar-width, var(--mdc-drawer-width, 0px));
+    /* 0px covers the narrow layout, where the sidebar token is unset. */
+    left: var(--ha-sidebar-width, 0px);
     right: 0;
     z-index: 4;
     padding-top: env(safe-area-inset-top, 0px);

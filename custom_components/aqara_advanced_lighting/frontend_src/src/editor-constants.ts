@@ -52,17 +52,7 @@ export function dialogActions(
 }
 
 /**
- * Detect whether the HA frontend provides ha-input (2026.4+).
- * Falls back to ha-textfield for older versions.
- */
-let _hasHaInput: boolean | undefined;
-export function hasHaInput(): boolean {
-  return (_hasHaInput ??= !!customElements.get('ha-input'));
-}
-
-/**
- * Render a text input field compatible with both ha-input (2026.4+)
- * and ha-textfield (legacy).
+ * Render a text input field.
  *
  * Usage:
  *   ${renderInput({ label: 'Name', value: this.name, onChange: this._handleName })}
@@ -79,28 +69,11 @@ export function renderInput(opts: {
   onChange?: (e: Event) => void;
   onInput?: (e: Event) => void;
 }): TemplateResult {
-  if (hasHaInput()) {
-    return html`
-      <ha-input
-        .label=${opts.label ?? ''}
-        .value=${opts.value ?? ''}
-        .hint=${opts.hint ?? ''}
-        type=${opts.type ?? nothing}
-        min=${opts.min ?? nothing}
-        max=${opts.max ?? nothing}
-        class=${opts.className ?? nothing}
-        style=${opts.style ?? nothing}
-        @change=${opts.onChange ?? nothing}
-        @input=${opts.onInput ?? nothing}
-      ></ha-input>
-    `;
-  }
   return html`
-    <ha-textfield
+    <ha-input
       .label=${opts.label ?? ''}
       .value=${opts.value ?? ''}
-      .helper=${opts.hint ?? ''}
-      .helperPersistent=${!!opts.hint}
+      .hint=${opts.hint ?? ''}
       type=${opts.type ?? nothing}
       min=${opts.min ?? nothing}
       max=${opts.max ?? nothing}
@@ -108,7 +81,7 @@ export function renderInput(opts: {
       style=${opts.style ?? nothing}
       @change=${opts.onChange ?? nothing}
       @input=${opts.onInput ?? nothing}
-    ></ha-textfield>
+    ></ha-input>
   `;
 }
 

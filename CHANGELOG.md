@@ -8,6 +8,10 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 
 The integration now requires Home Assistant 2026.6 or later. Earlier versions are no longer supported.
 
+### Internal
+
+  - Dropped the frontend compatibility shims for Home Assistant releases older than 2026.6: text fields render `ha-input` directly rather than detecting it and falling back to `ha-textfield`, and the panel header uses the `--ha-sidebar-width` sidebar token without the older `--mdc-drawer-width` fallback. No visible change on supported versions.
+
 ### Removed: legacy audio preset conversion
 
 **Breaking for old preset export files.** The conversion for two audio fields renamed in v1.3.0 has been removed. Presets stored in Home Assistant were converted automatically when you first ran v1.3.0 and are unaffected — this only concerns preset JSON files exported before April 2026.
