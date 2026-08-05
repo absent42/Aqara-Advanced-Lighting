@@ -21,6 +21,7 @@ Two consequences are inherent to the Home Assistant change and cannot be worked 
 
   - ZHA quirk registration now imports `CustomCluster` and `QuirkBuilder` from `zhaquirks` rather than the deprecated `zigpy.quirks.v2` paths, which warn on the zha-quirks 2.2 shipped with 2026.8. Same classes, no behaviour change.
   - Stale device cleanup and ZHA device lookups use the single-config-entry registry APIs on 2026.8+.
+  - Device pages now show the bulb's own firmware version. Devices separated by the 2026.8 migration kept a copy of the Zigbee2MQTT or ZHA device's firmware string, which never updated; that value is now replaced with ours, or cleared when the bulb does not report one.
 
 Pre-2026.8 cores keep the previous merged-device behaviour; the integration detects which model the running core uses.
 

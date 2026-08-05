@@ -248,6 +248,11 @@ class ZHABackend:
 
             # Register in HA device registry
             device_registry = dr.async_get(self.hass)
+            # sw_version is passed explicitly, including when None. A device
+            # split from a pre-migration composite is a copy of it, so it
+            # inherits ZHA's firmware string; identifier reconciliation does
+            # not touch it. Passing it here keeps ours in step with ZHA's,
+            # which sources the same zha_device.firmware_version.
             device_registry.async_get_or_create(
                 config_entry_id=self.entry.entry_id,
                 identifiers={(DOMAIN, ieee_str)},
@@ -256,6 +261,7 @@ class ZHABackend:
                 manufacturer=device.manufacturer or "Aqara",
                 model=MODEL_FRIENDLY_NAMES.get(model_id, model_id),
                 model_id=model_id,
+                sw_version=getattr(device, "firmware_version", None),
             )
 
             _LOGGER.debug(

@@ -170,6 +170,10 @@ class MQTTBackend:
                 friendly_name = device_data.get("friendly_name")
                 model_id = device_data.get("model_id")
                 manufacturer = device_data.get("manufacturer")
+                # Zigbee SWBuildID, reported by Z2M as software_build_id.
+                # Absent for some devices, in which case None is passed
+                # through deliberately - see the registration call below.
+                sw_version = device_data.get("software_build_id")
 
                 if not all([ieee_address, friendly_name, model_id]):
                     continue
@@ -247,6 +251,12 @@ class MQTTBackend:
                     #   light's device page. Safe to hold alongside the MQTT
                     #   integration's own copy: identifiers are unique per
                     #   config entry, not globally.
+                    # sw_version/hw_version are passed explicitly, including
+                    # when None. A device split from a pre-migration composite
+                    # is a copy of it, so it inherits the MQTT device's
+                    # firmware strings; identifier reconciliation does not
+                    # touch them. Passing them here replaces the inherited
+                    # values with ours, or clears them when we have none.
                     device = device_registry.async_get_or_create(
                         config_entry_id=self.entry.entry_id,
                         identifiers={our_identifier, mqtt_identifier},
@@ -254,6 +264,8 @@ class MQTTBackend:
                         manufacturer=manufacturer or "Aqara",
                         model=MODEL_FRIENDLY_NAMES.get(model_id, model_id),
                         model_id=model_id,
+                        sw_version=sw_version,
+                        hw_version=None,
                     )
                     _LOGGER.debug(
                         "Registered device for %s (%s)",
@@ -289,6 +301,10 @@ class MQTTBackend:
                         # MQTT device not found yet - create with both
                         # identifiers. When MQTT discovers this device later,
                         # it will find ours by the shared mqtt identifier.
+                        # This device is ours, so report firmware on it. The
+                        # merge branch above deliberately does not: that
+                        # device belongs to the MQTT integration, which owns
+                        # its own firmware data.
                         device = device_registry.async_get_or_create(
                             config_entry_id=self.entry.entry_id,
                             identifiers={our_identifier, mqtt_identifier},
@@ -296,6 +312,8 @@ class MQTTBackend:
                             manufacturer=manufacturer or "Aqara",
                             model=MODEL_FRIENDLY_NAMES.get(model_id, model_id),
                             model_id=model_id,
+                            sw_version=sw_version,
+                            hw_version=None,
                         )
                         _LOGGER.debug(
                             "Created new device for %s (%s), MQTT device "

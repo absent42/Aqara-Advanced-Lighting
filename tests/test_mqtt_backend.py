@@ -89,16 +89,21 @@ def mock_mqtt_wait():
         yield mock_wait
 
 
-def _make_bridge_devices_payload(*ieee_addresses: str) -> str:
+def _make_bridge_devices_payload(
+    *ieee_addresses: str, software_build_id: str | None = None
+) -> str:
     """Build a bridge/devices JSON payload for the given IEEE addresses."""
     devices = []
     for i, ieee in enumerate(ieee_addresses):
-        devices.append({
+        device: dict[str, str] = {
             "ieee_address": ieee,
             "friendly_name": f"device_{i}",
             "model_id": MODEL_T2,
             "manufacturer": "Aqara",
-        })
+        }
+        if software_build_id is not None:
+            device["software_build_id"] = software_build_id
+        devices.append(device)
     return json.dumps(devices)
 
 
@@ -579,4 +584,88 @@ async def test_single_config_entry_registry_keeps_our_identifier(
         "helper integrations must not mutate another integration's device "
         "on HA 2026.8+; merge_identifiers against a synthesized composite "
         "is silently dropped anyway"
+    )
+
+
+async def test_firmware_version_reported_and_inherited_value_cleared(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """We set sw_version from Z2M and clear firmware we do not own.
+
+    A device split from a pre-migration composite is a copy of it, so it
+    inherits the MQTT device's sw_version/hw_version and identifier
+    reconciliation never touches them. Passing both explicitly - including
+    None - replaces or clears the inherited strings instead of leaving a
+    stale snapshot of another integration's data on our device page.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    # Stand in for a device carrying firmware strings inherited from a split
+    dr_instance = dr.async_get(hass)
+    stale = dr_instance.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, IEEE_A)},
+        name="device_0",
+        sw_version="inherited-from-mqtt",
+        hw_version="inherited-hw",
+    )
+    assert stale.sw_version == "inherited-from-mqtt"
+
+    _fire_bridge_devices(
+        subscribe_calls,
+        _make_bridge_devices_payload(IEEE_A, software_build_id="0122052017"),
+    )
+    await hass.async_block_till_done()
+
+    device = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    assert device is not None
+    assert device.sw_version == "0122052017", (
+        "sw_version must come from the Z2M software_build_id, replacing any "
+        "value inherited from a composite split"
+    )
+    assert device.hw_version is None, (
+        "we have no hardware version, so an inherited one must be cleared "
+        "rather than left showing another integration's data"
+    )
+
+
+async def test_firmware_version_absent_from_payload_clears_inherited(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Z2M omitting software_build_id must clear, not keep, inherited firmware."""
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    dr_instance.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, IEEE_A)},
+        name="device_0",
+        sw_version="inherited-from-mqtt",
+    )
+
+    # No software_build_id in the payload
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+    await hass.async_block_till_done()
+
+    device = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    assert device is not None
+    assert device.sw_version is None, (
+        "an absent software_build_id must clear the inherited value, not "
+        "leave another integration's firmware string in place"
     )
