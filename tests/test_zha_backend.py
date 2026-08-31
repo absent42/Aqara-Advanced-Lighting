@@ -1,5 +1,7 @@
 """Tests for ZHABackend stale device removal."""
 
+import asyncio
+import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -383,3 +385,48 @@ async def test_device_registers_when_zha_device_not_yet_known(
         "a missing ZHA device must not stop us registering ours"
     )
     assert our_device.via_device_id is None, "there is no via device to link to"
+
+
+def _get_zha_backend(hass: HomeAssistant, entry: MockConfigEntry):
+    """Return the live ZHABackend instance for a config entry."""
+    return hass.data[DOMAIN]["entries"][entry.entry_id]["backend"]
+
+
+async def test_entity_mapping_retry_cancelled_on_shutdown(
+    hass: HomeAssistant,
+    mock_config_entry_zha: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+) -> None:
+    """A pending mapping retry must not outlive the config entry.
+
+    The retry runs for up to 30 seconds and writes entity_mapping_ready on
+    runtime_data. Left running across a reload it would keep writing to the
+    unloaded entry's data, and it also held up anything waiting on Home
+    Assistant's pending tasks for the whole 30 seconds.
+    """
+    # A device with no matching light entity leaves the mapping not ready,
+    # which is what schedules the retry.
+    gateway = _make_gateway(IEEE_A)
+    entry = await _setup_entry_with_real_zha_backend(
+        hass, mock_config_entry_zha, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, gateway,
+    )
+    backend = _get_zha_backend(hass, entry)
+
+    task = backend._mapping_retry_task
+    assert task is not None, "an empty mapping must schedule a retry"
+    assert not task.done(), "the retry should still be pending"
+
+    await backend.async_shutdown()
+
+    assert backend._mapping_retry_task is None, (
+        "shutdown must drop the retry so it cannot outlive the entry"
+    )
+
+    # cancel() only requests cancellation; await the task to let the loop
+    # deliver it before asserting on the outcome.
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert task.cancelled(), "the pending retry must be cancelled"

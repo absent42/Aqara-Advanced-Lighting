@@ -205,6 +205,7 @@ class ZHABackend:
         self.entry = entry
         self._entity_controller = entity_controller
         self._entity_to_ieee: dict[str, str] = {}
+        self._mapping_retry_task: asyncio.Task | None = None
 
     # --- Lifecycle ---
 
@@ -294,7 +295,7 @@ class ZHABackend:
                 "scheduling entity mapping retry",
                 len(self.entry.runtime_data.aqara_devices),
             )
-            self.hass.async_create_task(self._async_retry_entity_mapping())
+            self._schedule_mapping_retry()
 
     def _zha_config_entry_id(self) -> str | None:
         """Return the ZHA config entry id, or None if ZHA is not set up.
@@ -422,6 +423,18 @@ class ZHABackend:
         else:
             self.entry.runtime_data.entity_mapping_ready = False
 
+    def _schedule_mapping_retry(self) -> None:
+        """Start the mapping retry unless one is already running."""
+        if self._mapping_retry_task is not None and not self._mapping_retry_task.done():
+            return
+        # Background: this must not hold up config entry setup, and a retry
+        # left on the pending task list would block anything waiting on it
+        # for the full retry window.
+        self._mapping_retry_task = self.hass.async_create_background_task(
+            self._async_retry_entity_mapping(),
+            "aqara_advanced_lighting_zha_entity_mapping_retry",
+        )
+
     async def _async_retry_entity_mapping(self) -> None:
         """Retry entity mapping after ZHA finishes creating entities.
 
@@ -449,6 +462,9 @@ class ZHABackend:
 
     async def async_shutdown(self) -> None:
         """Shut down the backend and clean up resources."""
+        if self._mapping_retry_task is not None:
+            self._mapping_retry_task.cancel()
+            self._mapping_retry_task = None
         self._entity_to_ieee.clear()
         _LOGGER.debug("ZHA backend shut down")
 

@@ -13,6 +13,7 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 
   - The Zigbee2MQTT backend no longer reports setup as complete when it has found bulbs but matched no Home Assistant light entities to them. Zigbee2MQTT's device list is a retained message, so it can arrive before the MQTT integration has created the lights it describes; the panel showed setup as finished while no light was controllable. It now waits, retrying for 30 seconds, and says so in the log if the lights never appear. The ZHA backend already behaved this way.
   - A "Connected via" link missing because our device was registered before the Zigbee2MQTT one is now filled in by the same retry, rather than waiting for a device to join or leave the network.
+  - The ZHA backend's entity mapping retry is now stopped when the integration unloads. It ran for up to 30 seconds and was left running across a reload, where it kept writing to the unloaded entry's data.
 
 ### Internal
 
