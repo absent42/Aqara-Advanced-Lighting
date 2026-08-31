@@ -7,11 +7,13 @@
 
 import { LitElement, html, css, PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
-import { HomeAssistant } from './types';
+import { HomeAssistant, Translations } from './types';
+import { localize } from './editor-constants';
 
 @customElement('transition-curve-editor')
 export class TransitionCurveEditor extends LitElement {
   @property({ attribute: false }) hass!: HomeAssistant;
+  @property({ type: Object }) public translations: Translations = {};
   @property({ type: Number }) curvature = 1.0;  // Controlled from parent
   @property({ type: Number }) width = 300;
   @property({ type: Number }) height = 300;
@@ -396,12 +398,16 @@ export class TransitionCurveEditor extends LitElement {
     }));
   }
 
+  private _localize(key: string, replacements?: Record<string, string>): string {
+    return localize(this.translations, key, replacements);
+  }
+
   render() {
     return html`
       <div class="curve-editor-container">
         <div class="curve-header">
-          <span class="title">${this.hass.localize('component.aqara_advanced_lighting.panel.transition_curve.title')}</span>
-          <span class="subtitle">${this.hass.localize('component.aqara_advanced_lighting.panel.transition_curve.subtitle')}</span>
+          <span class="title">${this._localize('transition_curve.title')}</span>
+          <span class="subtitle">${this._localize('transition_curve.subtitle')}</span>
         </div>
 
         <div class="curve-canvas-wrapper">

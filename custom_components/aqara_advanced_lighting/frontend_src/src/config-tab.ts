@@ -964,6 +964,7 @@ export class AqaraConfigTab extends LitElement {
                   <div class="transition-curve-column">
                     <transition-curve-editor
                       .hass=${this.hass}
+                      .translations=${this.translations}
                       .curvature=${this._localCurvature}
                       @curvature-input=${this._handleCurvatureInput}
                     ></transition-curve-editor>

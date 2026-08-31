@@ -541,6 +541,10 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
   }
 
   public resetToDefaults(): void {
+    // Drop any thumbnail extracted but never persisted. The DELETE endpoint is
+    // idempotent and only evicts in-memory pending entries, so it is safe when
+    // _cancel() has already discarded the same id on the way here.
+    discardUnsaved(this.hass, this._thumbnail, this.preset?.thumbnail);
     this._name = '';
     this._icon = '';
     this._thumbnail = undefined;
@@ -997,7 +1001,7 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
           style="background-color: ${hexColor}"
           @click=${() => this._openColorPicker(index)}
           @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._openColorPicker(index); } }}
-          title="${this.hass.localize('component.aqara_advanced_lighting.panel.tooltips.color_edit')}"
+          title="${this._localize('tooltips.color_edit')}"
           aria-label="${this._localize('editors.color_label') || 'Color'} ${index + 1}: ${hexColor}"
         ></div>
         <div class="brightness-control">
@@ -1019,7 +1023,7 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
           ${this._colors.length > 1 ? html`
             <ha-icon-button
               @click=${() => this._removeColor(color.id)}
-              title="${this.hass.localize('component.aqara_advanced_lighting.panel.tooltips.color_remove')}"
+              title="${this._localize('tooltips.color_remove')}"
             >
               <ha-icon icon="mdi:close"></ha-icon>
             </ha-icon-button>
