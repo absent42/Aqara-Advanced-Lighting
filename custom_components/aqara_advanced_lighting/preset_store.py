@@ -65,6 +65,7 @@ _ALLOWED_FIELDS: dict[str, set[str]] = {
         "icon",
         "device_type",
         "segments",
+        "turn_off_unspecified",
         "thumbnail",
     },
     PRESET_TYPE_CCT_SEQUENCE: {
@@ -89,6 +90,7 @@ _ALLOWED_FIELDS: dict[str, set[str]] = {
         "loop_count",
         "end_behavior",
         "clear_segments",
+        "skip_first_in_loop",
         "thumbnail",
     },
     PRESET_TYPE_DYNAMIC_SCENE: {
