@@ -103,8 +103,9 @@ class MQTTBackend:
         )
         self._subscriptions.append(subscription)
 
-        # Request current devices list from Z2M
-        await self.async_request_devices()
+        # Z2M publishes bridge/devices retained, so subscribing above is
+        # enough to get the current list; it republishes on every join or
+        # leave. There is no bridge/request/devices topic to ask with.
 
         # Schedule a repair issue if the bridge doesn't respond within 120s
         self._bridge_check_cancel = async_call_later(
@@ -120,19 +121,6 @@ class MQTTBackend:
         for subscription in self._subscriptions:
             subscription()
         self._subscriptions.clear()
-
-    async def async_request_devices(self) -> None:
-        """Request current devices list from Z2M.
-
-        Z2M will respond by publishing to bridge/devices topic.
-        """
-        z2m_base_topic = self.entry.runtime_data.z2m_base_topic
-        request_topic = f"{z2m_base_topic}/bridge/request/devices"
-
-        _LOGGER.debug("Requesting devices list from Z2M: %s", request_topic)
-
-        # Send empty payload to request devices
-        await mqtt.async_publish(self.hass, request_topic, "")
 
     @callback
     def _check_bridge_responsive(self, _now: Any) -> None:

@@ -11,6 +11,7 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 
 ### Internal
 
+  - Removed a request published to `zigbee2mqtt/bridge/request/devices` on every setup. No such topic exists in Zigbee2MQTT, so the request was ignored. Device discovery is unaffected: Zigbee2MQTT publishes `bridge/devices` retained and republishes it whenever a device joins or leaves.
   - The pre-2026.8 device merge path passes a complete `new_identifiers` set instead of the deprecated `merge_identifiers`, which Home Assistant removes in 2027.9. No behaviour change; the path is only reached on cores older than 2026.8.
 
 ## [1.3.2] - 2026-08-05
