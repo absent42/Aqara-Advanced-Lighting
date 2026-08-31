@@ -137,6 +137,30 @@ SOFTWARE_TRANSITION_T1_STRIP_INTERVAL: Final = 0.5
 T1_STRIP_SEGMENTS_PER_METER: Final = 5
 T1_STRIP_DEFAULT_SEGMENT_COUNT: Final = 10  # 2 meters
 
+# Maximum strip segments an image may be projected across. At the T1 strip's
+# 5 segments per metre this is 12 metres of strip; T1M is fixed at 20 or 26,
+# and segment_utils already guards at 100.
+MAX_PROJECTION_SEGMENTS: Final = 60
+
+# HSP perceived brightness below which a projected segment is left unlit rather
+# than colored. Segments carry chromaticity only, so brightness cannot be varied
+# per segment -- where this boundary sits is the only way projection can convey
+# darkness at all.
+#
+# The metric is sqrt(0.299*R^2 + 0.587*G^2 + 0.114*B^2) over 0-1 channels, NOT
+# plain Rec. 601 luma. Do not "simplify" it back to the linear form: linear luma
+# caps pure blue at its 0.114 coefficient, which is below this threshold, so blue
+# would be unreachable at any intensity and every blue region of an image would
+# project as unlit. Squaring first and taking the root afterwards lifts saturated
+# hues clear of their coefficients (pure blue scores 0.338) while leaving greys
+# untouched -- the weights sum to 1, so a grey scores exactly its own normalised
+# value and the threshold keeps its plain meaning.
+#
+# _MIN_CHANNEL is deliberately not reused here: at 5/255 it is a reproducibility
+# floor ("can a light show this color"), not an on/off decision, and at ~2% it
+# never fires on real photographs.
+PROJECTION_DARK_THRESHOLD: Final = 0.12
+
 # Brightness constraints (UI uses percentage, devices use 1-255)
 MIN_BRIGHTNESS_PERCENT: Final = 1  # Minimum percentage for UI
 MAX_BRIGHTNESS_PERCENT: Final = 100  # Maximum percentage for UI
