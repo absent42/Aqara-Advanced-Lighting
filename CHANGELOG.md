@@ -2,6 +2,12 @@
 
 All notable changes to the Aqara Advanced Lighting integration will be documented in this file.
 
+## [1.3.3] - unreleased
+
+### Added
+
+  - The device page for an Aqara Advanced Lighting device now has a delete action. Since 2026.8 our devices are ours alone, so no other integration offered a way to remove one; a light dropped from Zigbee2MQTT or ZHA while Home Assistant was stopped left a device page that could not be cleared by hand. Deleting a device the backend still reports is refused, because setup re-creates it on the next discovery.
+
 ## [1.3.2] - 2026-08-05
 
 ### Minimum Home Assistant version is now 2026.6
@@ -2064,3 +2070,5 @@ One click HACS cutton
 [1.1.0]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.1.0
 [1.2.0]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.2.0
 [1.3.0]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.0
+[1.3.1]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.1
+[1.3.2]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.2
