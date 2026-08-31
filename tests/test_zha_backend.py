@@ -308,3 +308,78 @@ async def test_non_stale_zha_devices_unchanged(
     assert IEEE_A in mock_config_entry_zha.runtime_data.aqara_devices, (
         "device_a should be in runtime_data.aqara_devices"
     )
+
+
+async def test_device_links_to_zha_device_via_device_id(
+    hass: HomeAssistant,
+    mock_config_entry_zha: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+) -> None:
+    """Our device declares the ZHA device as its via device.
+
+    Since 2026.8 our device is a separate card from the light's. Pointing
+    via_device_id at the ZHA device gives it a "Connected via" link back to
+    the light.
+    """
+    zha_config_entry = MockConfigEntry(
+        domain="zha", title="ZHA", data={}, unique_id="zha_main",
+    )
+    zha_config_entry.add_to_hass(hass)
+    mock_config_entry_zha.add_to_hass(hass)
+
+    device_reg = dr.async_get(hass)
+    zha_device = device_reg.async_get_or_create(
+        config_entry_id=zha_config_entry.entry_id,
+        identifiers={("zha", IEEE_A)},
+        name="ZHA Light",
+    )
+
+    gateway = _make_gateway(IEEE_A)
+    with patch(
+        "homeassistant.components.zha.helpers.get_zha_gateway",
+        return_value=gateway,
+    ):
+        assert await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
+        await hass.async_block_till_done()
+
+    our_device = device_reg.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), mock_config_entry_zha.entry_id
+    )
+    assert our_device is not None, "we must register our own device"
+    assert our_device.via_device_id == zha_device.id, (
+        "our device must point at the ZHA device as its via device"
+    )
+
+
+async def test_device_registers_when_zha_device_not_yet_known(
+    hass: HomeAssistant,
+    mock_config_entry_zha: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+) -> None:
+    """Registration must survive ZHA's own device not being registered yet.
+
+    async_get_or_create raises DeviceInfoError for a via_device_id that is not
+    a registered device, so the link has to be skipped rather than guessed.
+    """
+    mock_config_entry_zha.add_to_hass(hass)
+
+    gateway = _make_gateway(IEEE_A)
+    with patch(
+        "homeassistant.components.zha.helpers.get_zha_gateway",
+        return_value=gateway,
+    ):
+        assert await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
+        await hass.async_block_till_done()
+
+    device_reg = dr.async_get(hass)
+    our_device = device_reg.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), mock_config_entry_zha.entry_id
+    )
+    assert our_device is not None, (
+        "a missing ZHA device must not stop us registering ours"
+    )
+    assert our_device.via_device_id is None, "there is no via device to link to"

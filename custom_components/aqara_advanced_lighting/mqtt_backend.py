@@ -266,6 +266,9 @@ class MQTTBackend:
                         model_id=model_id,
                         sw_version=sw_version,
                         hw_version=None,
+                        via_device_id=self._mqtt_via_device_id(
+                            device_registry, mqtt_identifier
+                        ),
                     )
                     _LOGGER.debug(
                         "Registered device for %s (%s)",
@@ -287,10 +290,15 @@ class MQTTBackend:
                             config_entry_id=self.entry.entry_id,
                             identifiers={mqtt_identifier},
                         )
-                        # Add our identifier so device triggers can find it
+                        # Add our identifier so device triggers can find it.
+                        # new_identifiers replaces the whole set, so carry the
+                        # device's existing identifiers over; merge_identifiers
+                        # is deprecated and removed in HA Core 2027.9.
                         device_registry.async_update_device(
                             existing_mqtt.id,
-                            merge_identifiers={our_identifier},
+                            new_identifiers=(
+                                existing_mqtt.identifiers | {our_identifier}
+                            ),
                         )
                         _LOGGER.debug(
                             "Merged %s into existing MQTT device %s",
@@ -330,6 +338,31 @@ class MQTTBackend:
 
         except (json.JSONDecodeError, KeyError) as ex:
             _LOGGER.error("Failed to parse bridge devices message: %s", ex)
+
+    def _mqtt_via_device_id(
+        self, device_registry: dr.DeviceRegistry, mqtt_identifier: tuple[str, str]
+    ) -> str | None:
+        """Return the device id of the MQTT light we shadow, if it is known.
+
+        Since 2026.8 our device is a card of its own rather than part of the
+        light's. Naming the MQTT device as our via device gives our card a
+        "Connected via" link back to the light.
+
+        None when MQTT is not set up or has not discovered the light yet:
+        async_get_or_create raises DeviceInfoError for a via_device_id that is
+        not a registered device, so the link cannot be guessed. Passing None
+        also clears a link whose device has gone. Z2M republishes
+        bridge/devices whenever a device changes, so a link missed on the
+        first message is set on a later one, or on the next restart.
+        """
+        mqtt_entries = self.hass.config_entries.async_entries("mqtt")
+        if not mqtt_entries:
+            return None
+
+        mqtt_device = device_registry.async_get_device_by_identifier(
+            mqtt_identifier, mqtt_entries[0].entry_id
+        )
+        return mqtt_device.id if mqtt_device else None
 
     def _remove_stale_devices(self, seen_ieee: set[str]) -> None:
         """Remove devices that are no longer in the Z2M device list."""

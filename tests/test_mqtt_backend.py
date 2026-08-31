@@ -669,3 +669,161 @@ async def test_firmware_version_absent_from_payload_clears_inherited(
         "an absent software_build_id must clear the inherited value, not "
         "leave another integration's firmware string in place"
     )
+
+
+async def test_legacy_merge_uses_new_identifiers_not_merge_identifiers(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """The pre-2026.8 merge path must not use the deprecated merge_identifiers.
+
+    merge_identifiers is deprecated and removed in HA Core 2027.9; the
+    replacement is to compute the complete set and pass new_identifiers.
+    new_identifiers has been available far longer than our minimum core, so
+    the legacy branch can use it without a version probe.
+
+    Asserts on the registry calls rather than resulting state, for the reason
+    given in test_single_config_entry_registry_keeps_our_identifier: this
+    branch models a core whose identifier uniqueness rules cannot be
+    simulated by patching the flag.
+    """
+    mqtt_config_entry = MockConfigEntry(
+        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
+    )
+    mqtt_config_entry.add_to_hass(hass)
+
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    mqtt_identifier = ("mqtt", f"zigbee2mqtt_{IEEE_A}")
+    dr_instance.async_get_or_create(
+        config_entry_id=mqtt_config_entry.entry_id,
+        identifiers={mqtt_identifier},
+        name="MQTT Light",
+    )
+
+    registry_cls = type(dr_instance)
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        False,
+    ), patch.object(
+        registry_cls, "async_update_device", autospec=True,
+        side_effect=registry_cls.async_update_device,
+    ) as spy_update:
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    assert not [
+        call for call in spy_update.call_args_list
+        if "merge_identifiers" in call.kwargs
+    ], "merge_identifiers is deprecated; pass the complete new_identifiers set"
+
+    merges = [
+        call for call in spy_update.call_args_list
+        if "new_identifiers" in call.kwargs
+    ]
+    assert merges, "the legacy path must still add our identifier to the device"
+
+    new_identifiers = merges[-1].kwargs["new_identifiers"]
+    assert (DOMAIN, IEEE_A) in new_identifiers, (
+        "our identifier must be added or device triggers cannot resolve"
+    )
+    assert mqtt_identifier in new_identifiers, (
+        "new_identifiers replaces the whole set, so the identifiers already "
+        "on the MQTT device must be carried over rather than dropped"
+    )
+
+
+async def test_device_links_to_mqtt_device_via_device_id(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Our device declares the MQTT light as its via device.
+
+    Since 2026.8 our device is a separate card from the light's. Pointing
+    via_device_id at the MQTT device gives it a "Connected via" link back to
+    the light, which reads better than two unrelated sibling cards.
+    """
+    mqtt_config_entry = MockConfigEntry(
+        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
+    )
+    mqtt_config_entry.add_to_hass(hass)
+
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    mqtt_identifier = ("mqtt", f"zigbee2mqtt_{IEEE_A}")
+    mqtt_device = dr_instance.async_get_or_create(
+        config_entry_id=mqtt_config_entry.entry_id,
+        identifiers={mqtt_identifier},
+        name="MQTT Light",
+    )
+
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        True,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    our_device = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert our_device is not None, "we must register our own device"
+    assert our_device.via_device_id == mqtt_device.id, (
+        "our device must point at the MQTT light as its via device"
+    )
+
+
+async def test_device_registers_when_mqtt_device_not_yet_known(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Registration must survive the MQTT device not existing yet.
+
+    Z2M's retained bridge/devices message can arrive before MQTT discovery
+    has created the light's device. async_get_or_create raises DeviceInfoError
+    for a via_device_id that is not a registered device, so the link has to be
+    skipped rather than guessed.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        True,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    dr_instance = dr.async_get(hass)
+    our_device = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert our_device is not None, (
+        "a missing MQTT device must not stop us registering ours"
+    )
+    assert our_device.via_device_id is None, "there is no via device to link to"

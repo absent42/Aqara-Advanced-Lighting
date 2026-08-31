@@ -6,7 +6,12 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 
 ### Added
 
+  - Each Aqara Advanced Lighting device page now shows a "Connected via" link back to the Zigbee2MQTT or ZHA device for the same bulb, so the two cards 2026.8 splits apart read as related rather than as unrelated siblings. The link appears once Zigbee2MQTT or ZHA has registered its own device; if ours is registered first it is linked on the next device list Zigbee2MQTT publishes, or on the next restart.
   - The device page for an Aqara Advanced Lighting device now has a delete action. Since 2026.8 our devices are ours alone, so no other integration offered a way to remove one; a light dropped from Zigbee2MQTT or ZHA while Home Assistant was stopped left a device page that could not be cleared by hand. Deleting a device the backend still reports is refused, because setup re-creates it on the next discovery.
+
+### Internal
+
+  - The pre-2026.8 device merge path passes a complete `new_identifiers` set instead of the deprecated `merge_identifiers`, which Home Assistant removes in 2027.9. No behaviour change; the path is only reached on cores older than 2026.8.
 
 ## [1.3.2] - 2026-08-05
 
