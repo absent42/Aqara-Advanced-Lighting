@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, issue_registry as ir
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.util.dt import utcnow
 
 from custom_components.aqara_advanced_lighting.const import (
@@ -827,3 +831,239 @@ async def test_device_registers_when_mqtt_device_not_yet_known(
         "a missing MQTT device must not stop us registering ours"
     )
     assert our_device.via_device_id is None, "there is no via device to link to"
+
+
+def _get_backend(hass: HomeAssistant, entry: MockConfigEntry):
+    """Return the live MQTTBackend instance for a config entry."""
+    return hass.data[DOMAIN]["entries"][entry.entry_id]["backend"]
+
+
+def _register_z2m_light(hass: HomeAssistant, ieee: str) -> str:
+    """Register a light entity carrying the IEEE address in its unique id.
+
+    Mirrors what the MQTT integration creates for a Z2M light, which our
+    mapping matches on with its unique_id strategy.
+    """
+    ent_reg = er.async_get(hass)
+    entry = ent_reg.async_get_or_create(
+        domain="light",
+        platform="mqtt",
+        unique_id=f"{ieee}_light_zigbee2mqtt",
+    )
+    return entry.entity_id
+
+
+async def test_entity_mapping_not_ready_without_light_entities(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Mapping nothing must not report the integration as ready.
+
+    Z2M's retained bridge/devices message can arrive before the MQTT
+    integration has registered the lights. Reporting ready then makes the
+    panel show setup as complete while no light is usable and nothing says
+    why. The ZHA backend already reports not-ready in this situation.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    with patch.object(
+        type(_get_backend(hass, entry)),
+        "_async_retry_entity_mapping",
+        new_callable=AsyncMock,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    assert entry.runtime_data.entity_mapping_ready is False, (
+        "a device list with no matching light entities is not a ready mapping"
+    )
+
+
+async def test_entity_mapping_ready_when_no_devices_discovered(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """An empty Z2M device list is a complete mapping, not a pending one.
+
+    There is nothing to wait for, so the panel must not sit on a loading
+    state for a user who has no supported bulbs.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload())
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.entity_mapping_ready is True, (
+        "no devices means there is nothing left to map"
+    )
+
+
+async def test_entity_mapping_retry_maps_entities_that_appear_late(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """The retry picks up light entities registered after the device list.
+
+    Z2M only republishes bridge/devices on a join or leave, so without a
+    retry the mapping would stay empty until then or until a restart.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+    backend = _get_backend(hass, entry)
+
+    with patch.object(
+        type(backend), "_async_retry_entity_mapping", new_callable=AsyncMock,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    assert entry.runtime_data.entity_mapping_ready is False
+
+    # MQTT discovery registers the light only now
+    entity_id = _register_z2m_light(hass, IEEE_A)
+
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_MAPPING_RETRY_INTERVAL",
+        0,
+    ):
+        await backend._async_retry_entity_mapping()
+
+    assert entry.runtime_data.entity_mapping_ready is True, (
+        "the retry must mark the mapping ready once entities exist"
+    )
+    assert entity_id in entry.runtime_data.entity_to_z2m_map, (
+        "the late entity must actually be mapped, not just declared ready"
+    )
+
+
+async def test_entity_mapping_retry_gives_up_and_reports_ready(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Exhausting the retries must still release the panel's loading state.
+
+    Staying not-ready forever would leave the panel loading with no way out.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+    backend = _get_backend(hass, entry)
+
+    with patch.object(
+        type(backend), "_async_retry_entity_mapping", new_callable=AsyncMock,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    # No light entity is ever registered
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_MAPPING_RETRY_INTERVAL",
+        0,
+    ), patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_MAPPING_RETRY_ATTEMPTS",
+        2,
+    ):
+        await backend._async_retry_entity_mapping()
+
+    assert entry.runtime_data.entity_mapping_ready is True, (
+        "giving up must release the loading state rather than hang the panel"
+    )
+    assert not entry.runtime_data.entity_to_z2m_map, (
+        "nothing was mappable, so nothing must be claimed as mapped"
+    )
+
+
+async def test_via_device_link_backfilled_when_mqtt_device_appears_late(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """The retry links our device once MQTT registers the light's device.
+
+    The via link is set when we register a device, which can happen before
+    MQTT discovery. Z2M only republishes bridge/devices on a join or leave,
+    so the link needs backfilling rather than waiting for a restart.
+    """
+    mqtt_config_entry = MockConfigEntry(
+        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
+    )
+    mqtt_config_entry.add_to_hass(hass)
+
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+    backend = _get_backend(hass, entry)
+
+    with patch.object(
+        type(backend), "_async_retry_entity_mapping", new_callable=AsyncMock,
+    ), patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        True,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    dr_instance = dr.async_get(hass)
+    our_device = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert our_device.via_device_id is None, "nothing to link to yet"
+
+    # MQTT discovery registers the light's device only now
+    mqtt_device = dr_instance.async_get_or_create(
+        config_entry_id=mqtt_config_entry.entry_id,
+        identifiers={("mqtt", f"zigbee2mqtt_{IEEE_A}")},
+        name="MQTT Light",
+    )
+    _register_z2m_light(hass, IEEE_A)
+
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_MAPPING_RETRY_INTERVAL",
+        0,
+    ), patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        True,
+    ):
+        await backend._async_retry_entity_mapping()
+
+    relinked = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert relinked.via_device_id == mqtt_device.id, (
+        "the retry must backfill the via link once the MQTT device exists"
+    )

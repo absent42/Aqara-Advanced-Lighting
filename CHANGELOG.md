@@ -6,8 +6,13 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 
 ### Added
 
-  - Each Aqara Advanced Lighting device page now shows a "Connected via" link back to the Zigbee2MQTT or ZHA device for the same bulb, so the two cards 2026.8 splits apart read as related rather than as unrelated siblings. The link appears once Zigbee2MQTT or ZHA has registered its own device; if ours is registered first it is linked on the next device list Zigbee2MQTT publishes, or on the next restart.
+  - Each Aqara Advanced Lighting device page now shows a "Connected via" link back to the Zigbee2MQTT or ZHA device for the same bulb, so the two cards 2026.8 splits apart read as related rather than as unrelated siblings. The link appears once Zigbee2MQTT or ZHA has registered its own device; if ours is registered first, it is filled in shortly afterwards.
   - The device page for an Aqara Advanced Lighting device now has a delete action. Since 2026.8 our devices are ours alone, so no other integration offered a way to remove one; a light dropped from Zigbee2MQTT or ZHA while Home Assistant was stopped left a device page that could not be cleared by hand. Deleting a device the backend still reports is refused, because setup re-creates it on the next discovery.
+
+### Fixed
+
+  - The Zigbee2MQTT backend no longer reports setup as complete when it has found bulbs but matched no Home Assistant light entities to them. Zigbee2MQTT's device list is a retained message, so it can arrive before the MQTT integration has created the lights it describes; the panel showed setup as finished while no light was controllable. It now waits, retrying for 30 seconds, and says so in the log if the lights never appear. The ZHA backend already behaved this way.
+  - A "Connected via" link missing because our device was registered before the Zigbee2MQTT one is now filled in by the same retry, rather than waiting for a device to join or leave the network.
 
 ### Internal
 
