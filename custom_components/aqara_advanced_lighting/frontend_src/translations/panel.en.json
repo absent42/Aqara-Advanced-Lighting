@@ -317,6 +317,7 @@
     "colors_label": "Colors (1-8)",
     "colors_brightness_label": "Colors and brightness (1-8)",
     "color_picker_title": "Select color",
+    "color_label": "Color",
     "color_temp_label": "Color temp",
     "apply_button": "Apply",
     "color_temperature_label": "Color temperature ({value}K)",
@@ -388,7 +389,8 @@
   },
   "color_history": {
     "recent_colors": "Recent colors",
-    "clear": "Clear"
+    "clear": "Clear",
+    "swatch_label": "Color"
   },
   "music_sync": {
     "title": "Music Sync",

@@ -1422,21 +1422,21 @@ export class CCTSequenceEditor extends ReorderableStepsMixin(LitElement) {
             <ha-icon-button
               @click=${() => this._moveStepUp(index)}
               .disabled=${index === 0}
-              title="${this.hass.localize('component.aqara_advanced_lighting.panel.tooltips.step_move_up')}"
+              title="${this._localize('tooltips.step_move_up')}"
             >
               <ha-icon icon="mdi:arrow-up"></ha-icon>
             </ha-icon-button>
             <ha-icon-button
               @click=${() => this._moveStepDown(index)}
               .disabled=${index === this._steps.length - 1}
-              title="${this.hass.localize('component.aqara_advanced_lighting.panel.tooltips.step_move_down')}"
+              title="${this._localize('tooltips.step_move_down')}"
             >
               <ha-icon icon="mdi:arrow-down"></ha-icon>
             </ha-icon-button>
             <ha-icon-button
               @click=${() => this._duplicateStep(step)}
               .disabled=${this._steps.length >= 20}
-              title="${this.hass.localize('component.aqara_advanced_lighting.panel.tooltips.step_duplicate')}"
+              title="${this._localize('tooltips.step_duplicate')}"
             >
               <ha-icon icon="mdi:content-copy"></ha-icon>
             </ha-icon-button>
@@ -1444,7 +1444,7 @@ export class CCTSequenceEditor extends ReorderableStepsMixin(LitElement) {
               class="step-delete"
               @click=${() => this._removeStep(step.id)}
               .disabled=${this._steps.length <= 1}
-              title="${this.hass.localize('component.aqara_advanced_lighting.panel.tooltips.step_remove')}"
+              title="${this._localize('tooltips.step_remove')}"
             >
               <ha-icon icon="mdi:delete"></ha-icon>
             </ha-icon-button>

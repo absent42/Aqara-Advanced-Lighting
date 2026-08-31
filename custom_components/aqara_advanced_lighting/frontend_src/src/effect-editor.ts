@@ -267,6 +267,10 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
   }
 
   public resetToDefaults(): void {
+    // Drop any thumbnail extracted but never persisted. The DELETE endpoint is
+    // idempotent and only evicts in-memory pending entries, so it is safe when
+    // _cancel() has already discarded the same id on the way here.
+    discardUnsaved(this.hass, this._thumbnail, this.preset?.thumbnail);
     this._name = '';
     this._icon = '';
     this._deviceType = 't2_bulb';

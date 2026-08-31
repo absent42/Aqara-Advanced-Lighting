@@ -11,7 +11,7 @@ import { PreferencesController } from './preferences-controller';
 import './running-operations';
 import './config-tab';
 import { getEntityFriendlyName, getEntityIcon, getEntityState, getEntityColor, hasRGBColorMode, hasCCTColorMode, getEntityDeviceType } from './entity-utils';
-import { builtinEffectToUser, builtinPatternToUser, builtinCCTToUser, builtinSegmentSequenceToUser, builtinDynamicSceneToUser } from './preset-duplicate';
+import { builtinEffectToUser, builtinPatternToUser, builtinCCTToUser, builtinSegmentSequenceToUser, builtinDynamicSceneToUser, userPresetToDuplicate } from './preset-duplicate';
 import {
   renderEffectThumbnail,
   renderSegmentPatternThumbnail,
@@ -4029,10 +4029,10 @@ export class AqaraPanel extends LitElement {
   }
 
   // Duplicate user preset methods - open editor in create mode with preset data pre-filled
-  private _duplicateUserPreset<T extends { id: string; name: string; created_at: string; modified_at: string }>(
+  private _duplicateUserPreset<T extends { id: string; name: string; created_at: string; modified_at: string; thumbnail?: string }>(
     preset: T, type: string, tab: PanelTab
   ): void {
-    const copy = { ...preset, id: '', name: `${preset.name} ${this._localize('presets.copy_suffix')}`, created_at: '', modified_at: '' };
+    const copy = userPresetToDuplicate(preset, this._localize('presets.copy_suffix'));
     this._clearEditorDraft(tab);
     this._editingPreset = { type, preset: copy as any, isDuplicate: true };
     this._setActiveTab(tab);
