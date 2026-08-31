@@ -172,6 +172,11 @@ class MQTTBackend:
                 # Absent for some devices, in which case None is passed
                 # through deliberately - see the registration call below.
                 sw_version = device_data.get("software_build_id")
+                if sw_version is not None and not isinstance(sw_version, str):
+                    # Straight out of Z2M's JSON, so the type is whatever the
+                    # bulb reported. HA deprecates non-string device registry
+                    # values and stops coercing them in 2026.12.
+                    sw_version = str(sw_version)
 
                 if not all([ieee_address, friendly_name, model_id]):
                     continue

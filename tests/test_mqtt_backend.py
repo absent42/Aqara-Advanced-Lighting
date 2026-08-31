@@ -94,12 +94,12 @@ def mock_mqtt_wait():
 
 
 def _make_bridge_devices_payload(
-    *ieee_addresses: str, software_build_id: str | None = None
+    *ieee_addresses: str, software_build_id: object | None = None
 ) -> str:
     """Build a bridge/devices JSON payload for the given IEEE addresses."""
     devices = []
     for i, ieee in enumerate(ieee_addresses):
-        device: dict[str, str] = {
+        device: dict[str, object] = {
             "ieee_address": ieee,
             "friendly_name": f"device_{i}",
             "model_id": MODEL_T2,
@@ -1067,3 +1067,74 @@ async def test_via_device_link_backfilled_when_mqtt_device_appears_late(
     assert relinked.via_device_id == mqtt_device.id, (
         "the retry must backfill the via link once the MQTT device exists"
     )
+
+
+async def test_non_string_software_build_id_is_coerced(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """A numeric software_build_id must reach the registry as a string.
+
+    software_build_id comes straight out of Z2M's JSON, so its type is
+    whatever the bulb reported. Home Assistant deprecates non-string values
+    for device registry fields and stops coercing them in 2026.12, so the
+    conversion has to happen here.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    registry_cls = type(dr_instance)
+    with patch.object(
+        registry_cls, "async_get_or_create", autospec=True,
+        side_effect=registry_cls.async_get_or_create,
+    ) as spy_create:
+        _fire_bridge_devices(
+            subscribe_calls,
+            _make_bridge_devices_payload(IEEE_A, software_build_id=20260817),
+        )
+        await hass.async_block_till_done()
+
+    # Asserts what we hand the registry, not what it does with it. Home
+    # Assistant still coerces non-strings today, so checking the stored
+    # value would pass either way; it is the deprecated call that matters.
+    our_creates = [
+        call for call in spy_create.call_args_list
+        if call.kwargs.get("config_entry_id") == entry.entry_id
+    ]
+    assert our_creates, "we must register a device under our own config entry"
+    sw_version = our_creates[-1].kwargs["sw_version"]
+    assert isinstance(sw_version, str), (
+        f"sw_version must reach the registry as a string, got {type(sw_version).__name__}"
+    )
+    assert sw_version == "20260817", "a numeric build id must be converted, not dropped"
+
+
+async def test_absent_software_build_id_stays_none(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """A bulb that reports no build id must not gain the string "None"."""
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+    await hass.async_block_till_done()
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert device is not None
+    assert device.sw_version is None, "absent firmware must stay absent"
