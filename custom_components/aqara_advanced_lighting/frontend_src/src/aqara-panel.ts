@@ -4488,9 +4488,12 @@ export class AqaraPanel extends LitElement {
     return html`<ha-icon icon="${icon}"></ha-icon>`;
   }
 
-  /** Render a user effect preset icon: thumbnail from colors, or MDI fallback. */
+  /** Render a user effect preset icon: image or generated thumbnail, or MDI fallback. */
   private _renderUserEffectIcon(preset: UserEffectPreset) {
-    if (preset.icon) {
+    // Precedence: uploaded thumbnail > MDI/file icon > auto-generated SVG.
+    // An uploaded thumbnail is a deliberate visual choice; the icon field is often
+    // a leftover MDI default from preset creation. Mirrors preset-runtime/preset-icon.ts.
+    if (preset.icon && !preset.thumbnail) {
       return this._renderPresetIcon(preset.icon, 'mdi:lightbulb-on');
     }
     const thumb = renderEffectThumbnail(preset)
@@ -4501,9 +4504,12 @@ export class AqaraPanel extends LitElement {
     return thumb;
   }
 
-  /** Render a user segment pattern preset icon: pie thumbnail or MDI fallback. */
+  /** Render a user segment pattern preset icon: image or pie thumbnail, or MDI fallback. */
   private _renderUserPatternIcon(preset: UserSegmentPatternPreset) {
-    if (preset.icon) {
+    // Precedence: uploaded thumbnail > MDI/file icon > auto-generated SVG.
+    // An uploaded thumbnail is a deliberate visual choice; the icon field is often
+    // a leftover MDI default from preset creation. Mirrors preset-runtime/preset-icon.ts.
+    if (preset.icon && !preset.thumbnail) {
       return this._renderPresetIcon(preset.icon, 'mdi:palette');
     }
     return renderSegmentPatternThumbnail(preset)
@@ -4519,9 +4525,12 @@ export class AqaraPanel extends LitElement {
       ?? html`<ha-icon icon="mdi:temperature-kelvin"></ha-icon>`;
   }
 
-  /** Render a user segment sequence preset icon: ring thumbnail or MDI fallback. */
+  /** Render a user segment sequence preset icon: image or ring thumbnail, or MDI fallback. */
   private _renderUserSegmentSequenceIcon(preset: UserSegmentSequencePreset) {
-    if (preset.icon) {
+    // Precedence: uploaded thumbnail > MDI/file icon > auto-generated SVG.
+    // An uploaded thumbnail is a deliberate visual choice; the icon field is often
+    // a leftover MDI default from preset creation. Mirrors preset-runtime/preset-icon.ts.
+    if (preset.icon && !preset.thumbnail) {
       return this._renderPresetIcon(preset.icon, 'mdi:animation-play');
     }
     return renderSegmentSequenceThumbnail(preset)

@@ -266,6 +266,7 @@ export interface UserEffectPreset {
   id: string;
   name: string;
   icon?: string;
+  thumbnail?: string;
   device_type?: string;
   effect: string;
   effect_speed: number;
@@ -281,6 +282,7 @@ export interface UserSegmentPatternPreset {
   id: string;
   name: string;
   icon?: string;
+  thumbnail?: string;
   device_type?: string;
   segments: SegmentColorEntry[];
   created_at: string;
@@ -308,6 +310,7 @@ export interface UserSegmentSequencePreset {
   id: string;
   name: string;
   icon?: string;
+  thumbnail?: string;
   device_type?: string;
   steps: SegmentSequenceStep[];
   loop_mode: string;
@@ -457,6 +460,7 @@ export interface GlobalPreferences {
 export interface EffectEditorDraft {
   name: string;
   icon: string;
+  thumbnail?: string;
   deviceType: string;
   effect: string;
   speed: number;
@@ -470,6 +474,7 @@ export interface EffectEditorDraft {
 export interface PatternEditorDraft {
   name: string;
   icon: string;
+  thumbnail?: string;
   deviceType: string;
   segments: Array<[number, XYColor]>;
   colorPalette: XYColor[];
@@ -504,6 +509,7 @@ export interface CCTEditorDraft {
 export interface SegmentSequenceEditorDraft {
   name: string;
   icon: string;
+  thumbnail?: string;
   deviceType: string;
   steps: Array<{
     id: string;

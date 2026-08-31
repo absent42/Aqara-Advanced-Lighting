@@ -15,6 +15,7 @@ import './xy-color-picker';
 import './color-history-swatches';
 import './image-color-extractor';
 import type { ColorsExtractedDetail } from './image-color-extractor';
+import { adoptThumbnail, discardUnsaved } from './thumbnail-lifecycle';
 import {
   AudioModeEntry,
   audioDeviceTier,
@@ -58,7 +59,7 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
   @state() private _editingColorIndex: number | null = null;
   @state() private _editingColor: XYColor | null = null;
   @state() private _showExtractor = false;
-  @state() private _extractorMode: 'upload' | 'url' = 'upload';
+  @state() private _extractorSource: 'upload' | 'url' = 'upload';
   @state() private _thumbnail?: string;
   @state() private _audioEnabled = false;
   @state() private _audioEntity = '';
@@ -841,21 +842,18 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
     const { colors, thumbnailId } = e.detail;
 
     // Replace all color slots with extracted colors
-    this._colors = colors.map(c => ({
-      id: this._generateColorId(),
-      x: c.x,
-      y: c.y,
-      brightness_pct: c.brightness_pct,
-    }));
+    this._colors = colors
+      .filter((c): c is DynamicSceneColor => c !== null)
+      .map(c => ({
+        id: this._generateColorId(),
+        x: c.x,
+        y: c.y,
+        brightness_pct: c.brightness_pct,
+      }));
 
-    if (thumbnailId) {
-      // Delete previous unsaved thumbnail before storing the new one
-      const originalThumb = this.preset?.thumbnail;
-      if (this._thumbnail && this._thumbnail !== originalThumb) {
-        this._deleteThumbnail(this._thumbnail);
-      }
-      this._thumbnail = thumbnailId;
-    }
+    this._thumbnail = adoptThumbnail(
+      this.hass, this._thumbnail, thumbnailId, this.preset?.thumbnail,
+    );
 
     this._showExtractor = false;
     this._hasUserInteraction = true;
@@ -958,10 +956,7 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
     this._hasUserInteraction = false;
 
     // Clean up unsaved thumbnail (one that was extracted but not yet persisted to a preset)
-    const originalThumb = this.preset?.thumbnail;
-    if (this._thumbnail && this._thumbnail !== originalThumb) {
-      this._deleteThumbnail(this._thumbnail);
-    }
+    discardUnsaved(this.hass, this._thumbnail, this.preset?.thumbnail);
 
     this.dispatchEvent(
       new CustomEvent('cancel', {
@@ -969,17 +964,6 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
         composed: true,
       })
     );
-  }
-
-  private _deleteThumbnail(thumbnailId: string): void {
-    const token = this.hass?.auth?.data?.access_token;
-    if (!token) return;
-    fetch(`/api/aqara_advanced_lighting/thumbnails/${thumbnailId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {
-      // Best-effort cleanup
-    });
   }
 
   /**
@@ -1110,7 +1094,7 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
                 @click=${() => { this._showExtractor = true; }}
               >
                 <ha-icon icon="mdi:image-search-outline"></ha-icon>
-                ${this._localize('dynamic_scene.extract_from_image') || 'Extract from image'}
+                ${this._localize('image_extractor.button_label') || 'Extract from image'}
               </button>
             </div>
           </div>
@@ -1121,20 +1105,20 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
           class="extractor-dialog"
           .open=${this._showExtractor}
           @closed=${() => { this._showExtractor = false; }}
-          .headerTitle=${this._localize('dynamic_scene.extract_from_image') || 'Extract from image'}
+          .headerTitle=${this._localize('image_extractor.button_label') || 'Extract from image'}
         >
           <span slot="headerNavigationIcon"></span>
           <div slot="headerActionItems" class="extractor-mode-toggle">
             <button
-              class="mode-btn ${this._extractorMode === 'upload' ? 'active' : ''}"
-              @click=${() => { this._extractorMode = 'upload'; }}
+              class="mode-btn ${this._extractorSource === 'upload' ? 'active' : ''}"
+              @click=${() => { this._extractorSource = 'upload'; }}
             >
               <ha-icon icon="mdi:upload"></ha-icon>
               ${this._localize('image_extractor.upload_tab')}
             </button>
             <button
-              class="mode-btn ${this._extractorMode === 'url' ? 'active' : ''}"
-              @click=${() => { this._extractorMode = 'url'; }}
+              class="mode-btn ${this._extractorSource === 'url' ? 'active' : ''}"
+              @click=${() => { this._extractorSource = 'url'; }}
             >
               <ha-icon icon="mdi:link"></ha-icon>
               ${this._localize('image_extractor.url_tab')}
@@ -1143,7 +1127,7 @@ export class DynamicSceneEditor extends ReorderableStepsMixin(LitElement) {
           <image-color-extractor
             .hass=${this.hass}
             .translations=${this.translations}
-            .mode=${this._extractorMode}
+            .source=${this._extractorSource}
             @colors-extracted=${this._handleColorsExtracted}
             @extractor-cancelled=${() => { this._showExtractor = false; }}
           ></image-color-extractor>

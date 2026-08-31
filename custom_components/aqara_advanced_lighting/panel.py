@@ -2490,21 +2490,36 @@ class ColorExtractView(HomeAssistantView):
 
         Accepts either:
         - Multipart form with 'file' field and optional 'num_colors',
-          'save_thumbnail', 'extract_brightness'
+          'save_thumbnail', 'extract_brightness', 'mode', 'segments',
+          'skip_dark'
         - JSON body with 'url' and optional 'num_colors', 'save_thumbnail',
-          'extract_brightness'
+          'extract_brightness', 'mode', 'segments', 'skip_dark'
+
+        'mode' is either 'palette' (default) or 'projection'. In projection
+        mode 'segments' selects how many strip segments to project onto and
+        the returned list may contain nulls for segments left unlit.
+        'skip_dark' (default true) controls whether near-black columns are
+        left unlit; with it false every segment gets a colour.
 
         Returns JSON with 'colors' list and optional 'thumbnail_id'.
         """
         hass: HomeAssistant = request.app["hass"]
 
-        from .image_processor import async_create_thumbnail, async_extract_colors
+        from .image_processor import (
+            async_create_thumbnail,
+            async_extract_colors,
+            async_extract_projection,
+            validate_extraction_mode,
+        )
 
         content_type = request.content_type or ""
         image_bytes: bytes | None = None
         num_colors = DEFAULT_EXTRACTED_COLORS
         save_thumbnail = False
         extract_brightness = True
+        mode = "palette"
+        segments = 0
+        skip_dark = True
 
         if "multipart" in content_type:
             # File upload
@@ -2524,6 +2539,17 @@ class ColorExtractView(HomeAssistantView):
                 elif part.name == "extract_brightness":
                     raw = await part.text()
                     extract_brightness = raw.lower() in ("true", "1", "yes")
+                elif part.name == "mode":
+                    mode = (await part.text()).strip()
+                elif part.name == "segments":
+                    raw = await part.text()
+                    try:
+                        segments = int(raw)
+                    except ValueError:
+                        pass
+                elif part.name == "skip_dark":
+                    raw = await part.text()
+                    skip_dark = raw.lower() in ("true", "1", "yes")
 
             if not image_bytes:
                 return web.Response(status=400, text="No file uploaded")
@@ -2547,6 +2573,9 @@ class ColorExtractView(HomeAssistantView):
             num_colors = int(data.get("num_colors", DEFAULT_EXTRACTED_COLORS))
             save_thumbnail = bool(data.get("save_thumbnail", False))
             extract_brightness = bool(data.get("extract_brightness", True))
+            mode = str(data.get("mode", "palette"))
+            segments = int(data.get("segments", 0))
+            skip_dark = bool(data.get("skip_dark", True))
 
             # Download the image with size-capped streaming read
             try:
@@ -2595,12 +2624,18 @@ class ColorExtractView(HomeAssistantView):
 
         # Extract colors
         try:
-            colors = await async_extract_colors(
-                hass,
-                image_bytes,
-                num_colors,
-                extract_brightness=extract_brightness,
-            )
+            validate_extraction_mode(mode)
+            if mode == "projection":
+                colors = await async_extract_projection(
+                    hass, image_bytes, segments, skip_dark=skip_dark
+                )
+            else:
+                colors = await async_extract_colors(
+                    hass,
+                    image_bytes,
+                    num_colors,
+                    extract_brightness=extract_brightness,
+                )
         except Exception as ex:
             _LOGGER.warning("Color extraction failed: %s", ex)
             return web.Response(status=422, text=f"Color extraction failed: {ex}")

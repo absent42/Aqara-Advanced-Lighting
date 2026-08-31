@@ -5,6 +5,7 @@ import { xyToRgb, rgbToXy } from './color-utils';
 import { colorPickerStyles } from './styles/color-picker';
 import { ReorderableStepsMixin, reorderableStepStyles } from './reorderable-steps-mixin';
 import { DEVICE_LABELS, DEFAULT_PALETTE, DEFAULT_GRADIENT_COLORS, DEFAULT_BLOCK_COLORS, editorFormStyles, localize, loopModeOptions, endBehaviorOptions } from './editor-constants';
+import { adoptThumbnail, discardUnsaved } from './thumbnail-lifecycle';
 
 interface EditableStep extends SegmentSequenceStep {
   id: string;
@@ -50,6 +51,7 @@ export class SegmentSequenceEditor extends ReorderableStepsMixin(LitElement) {
   @state() private _saving = false;
   @state() private _previewing = false;
   @state() private _hasUserInteraction = false;
+  @state() private _thumbnail?: string;
 
   // Note: Color picker modal is now handled by segment-selector component
   // No need for local color picker state
@@ -298,6 +300,7 @@ export class SegmentSequenceEditor extends ReorderableStepsMixin(LitElement) {
   private _loadPreset(preset: UserSegmentSequencePreset): void {
     this._name = preset.name;
     this._icon = preset.icon || '';
+    this._thumbnail = preset.thumbnail;
     this._deviceType = preset.device_type || 't1m';
     this._loopMode = preset.loop_mode;
     this._loopCount = preset.loop_count || 3;
@@ -389,6 +392,7 @@ export class SegmentSequenceEditor extends ReorderableStepsMixin(LitElement) {
       clearSegments: this._clearSegments,
       skipFirstInLoop: this._skipFirstInLoop,
       hasUserInteraction: this._hasUserInteraction,
+      thumbnail: this._thumbnail,
     };
   }
 
@@ -402,6 +406,7 @@ export class SegmentSequenceEditor extends ReorderableStepsMixin(LitElement) {
     this._clearSegments = false;
     this._skipFirstInLoop = false;
     this._hasUserInteraction = false;
+    this._thumbnail = undefined;
     this._addDefaultStep();
   }
 
@@ -440,6 +445,14 @@ export class SegmentSequenceEditor extends ReorderableStepsMixin(LitElement) {
       turnOffUnspecified: s.turnOffUnspecified,
     }));
     this._hasUserInteraction = draft.hasUserInteraction ?? false;
+    this._thumbnail = draft.thumbnail;
+  }
+
+  private _handleExtractedThumbnail(e: CustomEvent<{ thumbnailId: string }>): void {
+    this._thumbnail = adoptThumbnail(
+      this.hass, this._thumbnail, e.detail.thumbnailId, this.preset?.thumbnail,
+    );
+    this._hasUserInteraction = true;
   }
 
   private _addDefaultStep(): void {
@@ -737,6 +750,7 @@ export class SegmentSequenceEditor extends ReorderableStepsMixin(LitElement) {
       end_behavior: this._endBehavior,
       clear_segments: this._clearSegments,
       skip_first_in_loop: this._skipFirstInLoop,
+      thumbnail: this._thumbnail || undefined,
     };
 
     if (this._loopMode === 'count') {
@@ -793,6 +807,8 @@ export class SegmentSequenceEditor extends ReorderableStepsMixin(LitElement) {
 
   private _cancel(): void {
     this._hasUserInteraction = false;
+    // Clean up unsaved thumbnail (one that was extracted but not yet persisted to a preset)
+    discardUnsaved(this.hass, this._thumbnail, this.preset?.thumbnail);
     this.dispatchEvent(
       new CustomEvent('cancel', {
         bubbles: true,
@@ -861,6 +877,8 @@ export class SegmentSequenceEditor extends ReorderableStepsMixin(LitElement) {
             .colorHistory=${this.colorHistory}
             .zones=${this.deviceContext?.zones || []}
             .turnOffUnspecified=${step.turnOffUnspecified}
+            .enableImageExtraction=${true}
+            @extracted-thumbnail=${this._handleExtractedThumbnail}
             @color-value-changed=${(e: CustomEvent) => this._handleStepColorValueChange(step.id, e)}
             @color-palette-changed=${(e: CustomEvent) => this._handleStepColorPaletteChange(step.id, e)}
             @gradient-colors-changed=${(e: CustomEvent) => this._handleStepGradientColorsChange(step.id, e)}
