@@ -4,6 +4,7 @@ import { HomeAssistant, RGBColor, XYColor, SegmentColorEntry, UserSegmentPattern
 import { xyToRgb, rgbToXy } from './color-utils';
 import { colorPickerStyles } from './styles/color-picker';
 import { DEVICE_LABELS, DEFAULT_PALETTE, editorFormStyles, localize } from './editor-constants';
+import { adoptThumbnail, discardUnsaved } from './thumbnail-lifecycle';
 
 // Segment counts per device type
 const SEGMENT_COUNTS: Record<string, number> = {
@@ -60,6 +61,7 @@ export class PatternEditor extends LitElement {
   @state() private _gradientWaveCycles = 1;
   @state() private _turnOffUnspecified = true;
   @state() private _hasUserInteraction = false;
+  @state() private _thumbnail?: string;
 
   static styles = [
     colorPickerStyles,
@@ -247,6 +249,7 @@ export class PatternEditor extends LitElement {
     this._name = preset.name;
     this._icon = preset.icon || '';
     this._deviceType = preset.device_type || 't1m';
+    this._thumbnail = preset.thumbnail;
     this._segments = new Map();
     this._selectedSegments = new Set();
 
@@ -283,10 +286,15 @@ export class PatternEditor extends LitElement {
       gradientWaveCycles: this._gradientWaveCycles,
       turnOffUnspecified: this._turnOffUnspecified,
       hasUserInteraction: this._hasUserInteraction,
+      thumbnail: this._thumbnail,
     };
   }
 
   public resetToDefaults(): void {
+    // Drop any thumbnail extracted but never persisted. The DELETE endpoint is
+    // idempotent and only evicts in-memory pending entries, so it is safe when
+    // _cancel() has already discarded the same id on the way here.
+    discardUnsaved(this.hass, this._thumbnail, this.preset?.thumbnail);
     this._name = '';
     this._icon = '';
     this._deviceType = 't1m';
@@ -310,6 +318,7 @@ export class PatternEditor extends LitElement {
     this._gradientWaveCycles = 1;
     this._turnOffUnspecified = true;
     this._hasUserInteraction = false;
+    this._thumbnail = undefined;
   }
 
   private _restoreDraft(draft: PatternEditorDraft): void {
@@ -329,6 +338,14 @@ export class PatternEditor extends LitElement {
     this._gradientWaveCycles = draft.gradientWaveCycles;
     this._turnOffUnspecified = draft.turnOffUnspecified;
     this._hasUserInteraction = draft.hasUserInteraction ?? false;
+    this._thumbnail = draft.thumbnail;
+  }
+
+  private _handleExtractedThumbnail(e: CustomEvent<{ thumbnailId: string }>): void {
+    this._thumbnail = adoptThumbnail(
+      this.hass, this._thumbnail, e.detail.thumbnailId, this.preset?.thumbnail,
+    );
+    this._hasUserInteraction = true;
   }
 
   private _handleNameChange(e: CustomEvent): void {
@@ -431,6 +448,7 @@ export class PatternEditor extends LitElement {
       device_type: this._deviceType,
       segments,
       turn_off_unspecified: this._turnOffUnspecified,
+      thumbnail: this._thumbnail || undefined,
     };
   }
 
@@ -477,6 +495,8 @@ export class PatternEditor extends LitElement {
 
   private _cancel(): void {
     this._hasUserInteraction = false;
+    // Clean up unsaved thumbnail (one that was extracted but not yet persisted to a preset)
+    discardUnsaved(this.hass, this._thumbnail, this.preset?.thumbnail);
     this.dispatchEvent(
       new CustomEvent('cancel', {
         bubbles: true,
@@ -593,6 +613,8 @@ export class PatternEditor extends LitElement {
             .colorHistory=${this.colorHistory}
             .zones=${this.deviceContext?.zones || []}
             .turnOffUnspecified=${this._turnOffUnspecified}
+            .enableImageExtraction=${true}
+            @extracted-thumbnail=${this._handleExtractedThumbnail}
             @color-value-changed=${this._handleColorValueChange}
             @color-palette-changed=${this._handleColorPaletteChange}
             @gradient-colors-changed=${this._handleGradientColorsChange}

@@ -141,8 +141,8 @@ The frontend is built with **Lit** (lightweight web components library) and Type
 pre-commit run --all-files
 
 # Backend - Run tests for integration
-pytest ./tests/components/aqara_advanced_lighting \
-  --cov=homeassistant.components.aqara_advanced_lighting \
+scripts/run-tests.sh \
+  --cov=custom_components.aqara_advanced_lighting \
   --cov-report term-missing
 
 # Backend - Type checking
@@ -851,16 +851,29 @@ Describe testing performed:
 
 ```bash
 # Run all integration tests
-pytest ./tests/components/aqara_advanced_lighting
+scripts/run-tests.sh
 
 # Run with coverage
-pytest ./tests/components/aqara_advanced_lighting \
-  --cov=homeassistant.components.aqara_advanced_lighting \
+scripts/run-tests.sh \
+  --cov=custom_components.aqara_advanced_lighting \
   --cov-report term-missing \
   --cov-report html
 
-# Run specific test file
-pytest tests/components/aqara_advanced_lighting/test_config_flow.py
+# Run a specific test file, or select by name
+scripts/run-tests.sh tests/test_config_flow.py
+scripts/run-tests.sh -k device_registry
+```
+
+The tests need `pytest-homeassistant-custom-component`. The script uses it when
+it is installed and otherwise builds the same fixtures from the Home Assistant
+core checkout that provides the installed `homeassistant` package, so it works
+in a core dev container where that package is absent. Note that installing the
+plugin pins its own core version, which will downgrade a 2026.x checkout.
+
+Run it inside whatever environment has Home Assistant installed:
+
+```bash
+docker exec <container> /workspaces/integrations/aqara_advanced_lighting/scripts/run-tests.sh
 ```
 
 ### Manual Testing

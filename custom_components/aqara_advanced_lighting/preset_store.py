@@ -65,6 +65,7 @@ _ALLOWED_FIELDS: dict[str, set[str]] = {
         "icon",
         "device_type",
         "segments",
+        "turn_off_unspecified",
         "thumbnail",
     },
     PRESET_TYPE_CCT_SEQUENCE: {
@@ -89,6 +90,8 @@ _ALLOWED_FIELDS: dict[str, set[str]] = {
         "loop_count",
         "end_behavior",
         "clear_segments",
+        "skip_first_in_loop",
+        "thumbnail",
     },
     PRESET_TYPE_DYNAMIC_SCENE: {
         "name",
@@ -119,6 +122,26 @@ _ALLOWED_FIELDS: dict[str, set[str]] = {
         "audio_rolloff_brightness",
     },
 }
+
+def _collect_referenced_thumbnails(data: dict[str, Any]) -> set[str]:
+    """Collect thumbnail IDs referenced by presets of every type.
+
+    Deliberately generic over the store's preset-list keys. Effects, segment
+    patterns, segment sequences and dynamic scenes can all carry a thumbnail,
+    and a thumbnail missed here is deleted as an orphan at startup -- so this
+    must never be narrowed back to a single key.
+    """
+    referenced: set[str] = set()
+    for value in data.values():
+        if not isinstance(value, list):
+            continue
+        for preset in value:
+            if not isinstance(preset, dict):
+                continue
+            thumb_id = preset.get("thumbnail")
+            if isinstance(thumb_id, str) and thumb_id:
+                referenced.add(thumb_id)
+    return referenced
 
 class UserEffectPreset(TypedDict):
     """User-defined effect preset."""
@@ -597,12 +620,8 @@ class PresetStore(BaseStore[PresetsData]):
             if not thumb_dir.is_dir():
                 return []
 
-            # Collect all thumbnail IDs referenced by dynamic scene presets
-            referenced: set[str] = set()
-            for preset in self._data.get("dynamic_scene_presets", []):
-                thumb_id = preset.get("thumbnail")
-                if thumb_id:
-                    referenced.add(thumb_id)
+            # Collect thumbnail IDs referenced by presets of every type
+            referenced = _collect_referenced_thumbnails(self._data)
 
             # Find files on disk that are not referenced
             orphans: list[Path] = []

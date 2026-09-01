@@ -4,6 +4,7 @@ import colorsys
 import io
 import logging
 import math
+from functools import partial
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -11,6 +12,8 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     DEFAULT_EXTRACTED_COLORS,
+    MAX_PROJECTION_SEGMENTS,
+    PROJECTION_DARK_THRESHOLD,
     THUMBNAIL_JPEG_QUALITY,
     THUMBNAIL_MAX_DIMENSION,
 )
@@ -191,6 +194,151 @@ def _extract_palette(
         })
 
     return result
+
+EXTRACTION_MODE_PALETTE = "palette"
+EXTRACTION_MODE_PROJECTION = "projection"
+_EXTRACTION_MODES = (EXTRACTION_MODE_PALETTE, EXTRACTION_MODE_PROJECTION)
+
+def validate_extraction_mode(mode: str) -> str:
+    """Validate an extraction mode string, returning it unchanged.
+
+    Lives here rather than in the aiohttp view so it can be unit tested without
+    view-level test infrastructure. Callers let the ValueError propagate; the
+    view already converts extraction errors into a 422.
+
+    Raises:
+        ValueError: If the mode is not recognised.
+    """
+    if mode not in _EXTRACTION_MODES:
+        msg = f"Unknown extraction mode: {mode!r}"
+        raise ValueError(msg)
+    return mode
+
+def _extract_projection(
+    image_bytes: bytes,
+    segments: int,
+    *,
+    skip_dark: bool = True,
+) -> list[dict[str, float | int] | None]:
+    """Project an image across a strip's segments, left to right.
+
+    Runs in an executor thread -- no async calls allowed.
+
+    Unlike _extract_palette, position is meaningful: entry i is the mean colour
+    of the i-th vertical slice of the image, and there is no diversity selection
+    or hue sorting.
+
+    With skip_dark (the default), columns whose HSP perceived brightness falls
+    below PROJECTION_DARK_THRESHOLD yield None instead of a colour.
+    Segments carry chromaticity only and every projected colour is emitted at full
+    output, so leaving a segment unspecified is the sole means by which projection
+    can represent a dark region of the image at all. Returning None here also
+    avoids the _extract_palette behaviour that would otherwise apply: _rgb_to_xy
+    substitutes the D65 white point for zero-luminance input, which would render a
+    black region as a full-brightness white segment. The frontend's
+    turn-off-unspecified handling already covers the None entries.
+
+    With skip_dark False every column yields a colour and no None is produced, so
+    the whole strip is lit. This is a deliberate user choice, exposed because some
+    images otherwise leave large runs of segments dark, and its consequence is the
+    one described above: a dark region is lit at full output in its own hue, and a
+    black or neutral-grey region takes the D65 white point from _rgb_to_xy and
+    renders as a full-brightness white segment. That is the accepted trade-off for
+    filling the strip, not a bug to be "fixed" by reinstating the None entries.
+
+    brightness_pct is always 100 and is dropped by the frontend consumer, since
+    segments are XY-only. It is present purely for shape-compatibility with
+    _extract_palette's output.
+
+    Args:
+        image_bytes: Raw image file bytes.
+        segments: Number of strip segments to project onto. Clamped to
+            1..MAX_PROJECTION_SEGMENTS.
+        skip_dark: Whether near-black columns are left unlit (None) rather than
+            lit. Defaults to True, the original behaviour.
+
+    Returns:
+        List of length `segments` (post-clamp). Each entry is a dict with x, y
+        and brightness_pct keys, or None for a near-black column when skip_dark
+        is set.
+
+    Raises:
+        UnidentifiedImageError: If the bytes are not a valid image.
+    """
+    requested_segments = segments
+    segments = max(1, min(MAX_PROJECTION_SEGMENTS, segments))
+    if segments != requested_segments:
+        _LOGGER.debug(
+            "Projection segment count clamped from %s to %s",
+            requested_segments,
+            segments,
+        )
+
+    img = Image.open(io.BytesIO(image_bytes))
+
+    # Normalise orientation from EXIF before any processing
+    img = ImageOps.exif_transpose(img)
+
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    # BOX is the definitionally correct filter here: it is an exact area mean per
+    # column, which is what "the mean colour of the i-th vertical slice" means.
+    # LANCZOS is not a mean -- its negative lobes ring across hard edges, so on a
+    # black/yellow boundary it returns (17, 17, 0) for columns whose source pixels
+    # are entirely black. That would defeat the dark-column branch below and light
+    # genuinely black segments.
+    strip = img.resize((segments, 1), Image.Resampling.BOX)
+
+    result: list[dict[str, float | int] | None] = []
+    for index in range(segments):
+        r, g, b = strip.getpixel((index, 0))
+        if skip_dark:
+            # HSP perceived brightness, not linear Rec. 601 luma. See
+            # PROJECTION_DARK_THRESHOLD in const.py: the linear form caps pure
+            # blue below the threshold, making blue unreachable at any intensity.
+            perceived = math.sqrt(
+                0.299 * (r / 255) ** 2
+                + 0.587 * (g / 255) ** 2
+                + 0.114 * (b / 255) ** 2
+            )
+            if perceived < PROJECTION_DARK_THRESHOLD:
+                result.append(None)
+                continue
+        x, y = _rgb_to_xy(r, g, b)
+        result.append({
+            "x": round_xy(x),
+            "y": round_xy(y),
+            "brightness_pct": 100,
+        })
+
+    return result
+
+async def async_extract_projection(
+    hass: HomeAssistant,
+    image_bytes: bytes,
+    segments: int,
+    *,
+    skip_dark: bool = True,
+) -> list[dict[str, float | int] | None]:
+    """Project an image across strip segments (async wrapper).
+
+    Args:
+        hass: Home Assistant instance.
+        image_bytes: Raw image file bytes.
+        segments: Number of strip segments to project onto.
+        skip_dark: Whether near-black columns are left unlit. See
+            _extract_projection for what turning this off renders.
+
+    Returns:
+        List of colour dicts and Nones, one per segment, in strip order. No None
+        entries are produced when skip_dark is False.
+    """
+    # partial rather than positional args: skip_dark is keyword-only and
+    # async_add_executor_job forwards positionally.
+    return await hass.async_add_executor_job(
+        partial(_extract_projection, image_bytes, segments, skip_dark=skip_dark)
+    )
 
 def _create_thumbnail(image_bytes: bytes) -> bytes:
     """Create an optimised JPEG thumbnail from image bytes.

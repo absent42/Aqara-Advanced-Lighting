@@ -317,6 +317,7 @@
     "colors_label": "Colors (1-8)",
     "colors_brightness_label": "Colors and brightness (1-8)",
     "color_picker_title": "Select color",
+    "color_label": "Color",
     "color_temp_label": "Color temp",
     "apply_button": "Apply",
     "color_temperature_label": "Color temperature ({value}K)",
@@ -388,7 +389,8 @@
   },
   "color_history": {
     "recent_colors": "Recent colors",
-    "clear": "Clear"
+    "clear": "Clear",
+    "swatch_label": "Color"
   },
   "music_sync": {
     "title": "Music Sync",
@@ -406,7 +408,6 @@
   },
   "dynamic_scene": {
     "add_color_button": "Add color",
-    "extract_from_image": "Extract from image",
     "timing_label": "Timing",
     "distribution_mode_label": "Color assignment",
     "distribution_shuffle_rotate": "Shuffle and rotate",
@@ -472,12 +473,19 @@
     "audio_preset_custom": "Custom"
   },
   "image_extractor": {
+    "button_label": "Extract from image",
     "upload_tab": "Upload",
     "url_tab": "URL",
     "drop_hint": "Click or drop an image here",
     "change_image": "Change image",
     "url_label": "Image URL",
+    "mode_palette": "Palette",
+    "mode_projection": "Project onto strip",
+    "mode_palette_hint": "Pick the most prominent colours from the image.",
+    "mode_projection_hint": "Map the image across the strip from left to right. Very dark areas are left unlit by default.",
     "extract_brightness": "Extract brightness from image",
+    "skip_dark": "Leave dark areas unlit",
+    "skip_dark_hint": "Turn off to fill every segment. Dark regions are then lit at full brightness, and black or grey ones show as white.",
     "save_thumbnail": "Use image as preset thumbnail",
     "extract_button": "Extract colors",
     "cancel_button": "Cancel",

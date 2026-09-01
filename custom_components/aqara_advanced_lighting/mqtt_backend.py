@@ -56,6 +56,12 @@ _SINGLE_CONFIG_ENTRY_REGISTRY = hasattr(
     dr.DeviceRegistry, "async_get_device_by_identifier"
 )
 
+# Entity mapping retry. Z2M publishes bridge/devices retained, so it can
+# arrive before the MQTT integration has registered the lights it describes,
+# and Z2M only republishes on a join or leave.
+_MAPPING_RETRY_ATTEMPTS = 6
+_MAPPING_RETRY_INTERVAL = 5
+
 # Characters unsafe for MQTT topic construction (wildcards, separator, null)
 _UNSAFE_TOPIC_NAME = re.compile(r"[/#+\x00]|\.\.")
 
@@ -89,6 +95,7 @@ class MQTTBackend:
         self._entity_controller = entity_controller
         self._subscriptions: list[mqtt.SubscriptionState] = []
         self._bridge_check_cancel: Callable[[], None] | None = None
+        self._mapping_retry_task: asyncio.Task | None = None
 
     async def async_setup(self) -> None:
         """Set up MQTT subscriptions."""
@@ -103,8 +110,9 @@ class MQTTBackend:
         )
         self._subscriptions.append(subscription)
 
-        # Request current devices list from Z2M
-        await self.async_request_devices()
+        # Z2M publishes bridge/devices retained, so subscribing above is
+        # enough to get the current list; it republishes on every join or
+        # leave. There is no bridge/request/devices topic to ask with.
 
         # Schedule a repair issue if the bridge doesn't respond within 120s
         self._bridge_check_cancel = async_call_later(
@@ -113,6 +121,9 @@ class MQTTBackend:
 
     async def async_teardown(self) -> None:
         """Tear down MQTT subscriptions."""
+        if self._mapping_retry_task is not None:
+            self._mapping_retry_task.cancel()
+            self._mapping_retry_task = None
         if self._bridge_check_cancel:
             self._bridge_check_cancel()
             self._bridge_check_cancel = None
@@ -120,19 +131,6 @@ class MQTTBackend:
         for subscription in self._subscriptions:
             subscription()
         self._subscriptions.clear()
-
-    async def async_request_devices(self) -> None:
-        """Request current devices list from Z2M.
-
-        Z2M will respond by publishing to bridge/devices topic.
-        """
-        z2m_base_topic = self.entry.runtime_data.z2m_base_topic
-        request_topic = f"{z2m_base_topic}/bridge/request/devices"
-
-        _LOGGER.debug("Requesting devices list from Z2M: %s", request_topic)
-
-        # Send empty payload to request devices
-        await mqtt.async_publish(self.hass, request_topic, "")
 
     @callback
     def _check_bridge_responsive(self, _now: Any) -> None:
@@ -174,6 +172,11 @@ class MQTTBackend:
                 # Absent for some devices, in which case None is passed
                 # through deliberately - see the registration call below.
                 sw_version = device_data.get("software_build_id")
+                if sw_version is not None and not isinstance(sw_version, str):
+                    # Straight out of Z2M's JSON, so the type is whatever the
+                    # bulb reported. HA deprecates non-string device registry
+                    # values and stops coercing them in 2026.12.
+                    sw_version = str(sw_version)
 
                 if not all([ieee_address, friendly_name, model_id]):
                     continue
@@ -266,6 +269,9 @@ class MQTTBackend:
                         model_id=model_id,
                         sw_version=sw_version,
                         hw_version=None,
+                        via_device_id=self._mqtt_via_device_id(
+                            device_registry, mqtt_identifier
+                        ),
                     )
                     _LOGGER.debug(
                         "Registered device for %s (%s)",
@@ -287,10 +293,15 @@ class MQTTBackend:
                             config_entry_id=self.entry.entry_id,
                             identifiers={mqtt_identifier},
                         )
-                        # Add our identifier so device triggers can find it
+                        # Add our identifier so device triggers can find it.
+                        # new_identifiers replaces the whole set, so carry the
+                        # device's existing identifiers over; merge_identifiers
+                        # is deprecated and removed in HA Core 2027.9.
                         device_registry.async_update_device(
                             existing_mqtt.id,
-                            merge_identifiers={our_identifier},
+                            new_identifiers=(
+                                existing_mqtt.identifiers | {our_identifier}
+                            ),
                         )
                         _LOGGER.debug(
                             "Merged %s into existing MQTT device %s",
@@ -328,8 +339,110 @@ class MQTTBackend:
             # Update entity to Z2M mapping
             self._update_entity_mapping()
 
+            # Z2M only republishes bridge/devices on a join or leave, so a
+            # mapping that found nothing needs a retry of its own.
+            if not self.entry.runtime_data.entity_mapping_ready:
+                self._schedule_mapping_retry()
+
         except (json.JSONDecodeError, KeyError) as ex:
             _LOGGER.error("Failed to parse bridge devices message: %s", ex)
+
+    def _schedule_mapping_retry(self) -> None:
+        """Start the mapping retry unless one is already running."""
+        if self._mapping_retry_task is not None and not self._mapping_retry_task.done():
+            return
+        # Background: this must not hold up config entry setup, and the
+        # retry can outlive the bridge/devices message that started it.
+        self._mapping_retry_task = self.hass.async_create_background_task(
+            self._async_retry_entity_mapping(),
+            "aqara_advanced_lighting_entity_mapping_retry",
+        )
+
+    async def _async_retry_entity_mapping(self) -> None:
+        """Retry entity mapping until the MQTT lights show up.
+
+        Z2M's retained bridge/devices message can arrive before the MQTT
+        integration has registered the lights it describes, leaving nothing
+        to map. Z2M republishes only on a join or leave, so without this the
+        mapping would stay empty until then or until a restart.
+
+        Each pass also backfills via device links, which are set during
+        registration and so miss the same window.
+        """
+        for attempt in range(1, _MAPPING_RETRY_ATTEMPTS + 1):
+            await asyncio.sleep(_MAPPING_RETRY_INTERVAL)
+            self._backfill_via_device_links()
+            self._update_entity_mapping()
+            if self.entry.runtime_data.entity_mapping_ready:
+                _LOGGER.info("Entity mapping succeeded on retry %d", attempt)
+                return
+
+        _LOGGER.warning(
+            "Entity mapping found no light entities after %d retries "
+            "(%d devices discovered). The Zigbee2MQTT lights may not be "
+            "exposed to Home Assistant yet -- try reloading the integration",
+            _MAPPING_RETRY_ATTEMPTS,
+            len(self.entry.runtime_data.devices),
+        )
+        # Release the frontend's loading state rather than wait forever
+        self.entry.runtime_data.entity_mapping_ready = True
+
+    def _backfill_via_device_links(self) -> None:
+        """Link our devices to MQTT light devices registered since setup.
+
+        The via link is set when we register a device, which can run before
+        MQTT discovery has created the light's device. Nothing re-registers
+        our devices until Z2M republishes bridge/devices, so it is filled in
+        here instead.
+        """
+        if not _SINGLE_CONFIG_ENTRY_REGISTRY:
+            return
+
+        device_registry = dr.async_get(self.hass)
+        z2m_base_topic = self.entry.runtime_data.z2m_base_topic
+
+        for device in list(
+            dr.async_entries_for_config_entry(device_registry, self.entry.entry_id)
+        ):
+            if device.via_device_id is not None:
+                continue
+            for identifier_domain, identifier_value in device.identifiers:
+                if identifier_domain != DOMAIN:
+                    continue
+                via_device_id = self._mqtt_via_device_id(
+                    device_registry,
+                    ("mqtt", f"{z2m_base_topic}_{identifier_value}"),
+                )
+                if via_device_id is not None:
+                    device_registry.async_update_device(
+                        device.id, via_device_id=via_device_id
+                    )
+                break
+
+    def _mqtt_via_device_id(
+        self, device_registry: dr.DeviceRegistry, mqtt_identifier: tuple[str, str]
+    ) -> str | None:
+        """Return the device id of the MQTT light we shadow, if it is known.
+
+        Since 2026.8 our device is a card of its own rather than part of the
+        light's. Naming the MQTT device as our via device gives our card a
+        "Connected via" link back to the light.
+
+        None when MQTT is not set up or has not discovered the light yet:
+        async_get_or_create raises DeviceInfoError for a via_device_id that is
+        not a registered device, so the link cannot be guessed. Passing None
+        also clears a link whose device has gone. Z2M republishes
+        bridge/devices whenever a device changes, so a link missed on the
+        first message is set on a later one, or on the next restart.
+        """
+        mqtt_entries = self.hass.config_entries.async_entries("mqtt")
+        if not mqtt_entries:
+            return None
+
+        mqtt_device = device_registry.async_get_device_by_identifier(
+            mqtt_identifier, mqtt_entries[0].entry_id
+        )
+        return mqtt_device.id if mqtt_device else None
 
     def _remove_stale_devices(self, seen_ieee: set[str]) -> None:
         """Remove devices that are no longer in the Z2M device list."""
@@ -538,8 +651,13 @@ class MQTTBackend:
             dict(runtime_data.entity_to_z2m_map),
         )
 
-        # Mark entity mapping as ready so the frontend can detect setup completion
-        runtime_data.entity_mapping_ready = True
+        # Only mark ready once entities are actually mapped, or there is
+        # nothing to map. Reporting ready with a device list we could not
+        # match leaves the panel claiming setup is complete while no light
+        # is usable.
+        runtime_data.entity_mapping_ready = bool(
+            mapped_count > 0 or not runtime_data.devices
+        )
 
     def get_z2m_friendly_name(self, entity_id: str) -> str | None:
         """Get Z2M friendly name for a Home Assistant entity ID."""

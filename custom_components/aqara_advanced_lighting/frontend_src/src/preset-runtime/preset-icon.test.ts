@@ -160,4 +160,121 @@ describe('renderPresetIcon', () => {
     const html = renderToHTML(renderPresetIcon(ref, preset, false, { showAudioBadge: false }));
     expect(html).not.toContain('audio-badge');
   });
+
+  // -------------------------------------------------------------------------
+  // Thumbnail-over-icon precedence for the three preset types that gained
+  // image extraction. An uploaded thumbnail is a deliberate visual choice and
+  // must beat an icon left over from preset creation, matching dynamic scenes.
+  // -------------------------------------------------------------------------
+
+  it('user effect with both thumbnail and icon shows the thumbnail (image)', () => {
+    const ref: FavoritePresetRef = { type: 'effect', id: 'u1' };
+    const preset = {
+      id: 'u1', name: 'Sunset',
+      effect: 'jitter', effect_speed: 50,
+      effect_colors: [{ x: 0.5, y: 0.5 }],
+      thumbnail: 'eff123',
+      icon: 'mdi:music',
+    } as any;
+    const html = renderToHTML(renderPresetIcon(ref, preset, true));
+    expect(html).toContain('thumbnails/eff123');
+    expect(html).not.toContain('mdi:music');
+  });
+
+  it('user effect with an icon and no thumbnail shows the icon', () => {
+    const ref: FavoritePresetRef = { type: 'effect', id: 'u1' };
+    const preset = {
+      id: 'u1', name: 'Sunset',
+      effect: 'jitter', effect_speed: 50,
+      effect_colors: [{ x: 0.5, y: 0.5 }],
+      icon: 'mdi:music',
+    } as any;
+    const html = renderToHTML(renderPresetIcon(ref, preset, true));
+    expect(html).toContain('mdi:music');
+    expect(html).not.toContain('thumbnails/');
+  });
+
+  it('user effect with neither thumbnail nor icon shows the generated SVG', () => {
+    const ref: FavoritePresetRef = { type: 'effect', id: 'u1' };
+    const preset = {
+      id: 'u1', name: 'Sunset',
+      effect: 'jitter', effect_speed: 50,
+      effect_colors: [{ x: 0.5, y: 0.5 }],
+    } as any;
+    const html = renderToHTML(renderPresetIcon(ref, preset, true));
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('thumbnails/');
+  });
+
+  it('user segment pattern with both thumbnail and icon shows the thumbnail (image)', () => {
+    const ref: FavoritePresetRef = { type: 'segment_pattern', id: 'p1' };
+    const preset = {
+      id: 'p1', name: 'Stripes',
+      segments: [{ segment: 1, color: { r: 255, g: 0, b: 0 } }],
+      thumbnail: 'pat123',
+      icon: 'mdi:music',
+    } as any;
+    const html = renderToHTML(renderPresetIcon(ref, preset, true));
+    expect(html).toContain('thumbnails/pat123');
+    expect(html).not.toContain('mdi:music');
+  });
+
+  it('user segment pattern with an icon and no thumbnail shows the icon', () => {
+    const ref: FavoritePresetRef = { type: 'segment_pattern', id: 'p1' };
+    const preset = {
+      id: 'p1', name: 'Stripes',
+      segments: [{ segment: 1, color: { r: 255, g: 0, b: 0 } }],
+      icon: 'mdi:music',
+    } as any;
+    const html = renderToHTML(renderPresetIcon(ref, preset, true));
+    expect(html).toContain('mdi:music');
+    expect(html).not.toContain('thumbnails/');
+  });
+
+  it('user segment pattern with neither thumbnail nor icon shows the generated SVG', () => {
+    const ref: FavoritePresetRef = { type: 'segment_pattern', id: 'p1' };
+    const preset = {
+      id: 'p1', name: 'Stripes',
+      segments: [{ segment: 1, color: { r: 255, g: 0, b: 0 } }],
+    } as any;
+    const html = renderToHTML(renderPresetIcon(ref, preset, true));
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('thumbnails/');
+  });
+
+  it('user segment sequence with both thumbnail and icon shows the thumbnail (image)', () => {
+    const ref: FavoritePresetRef = { type: 'segment_sequence', id: 's1' };
+    const preset = {
+      id: 's1', name: 'Chase',
+      steps: [{ segment_colors: [{ segment: 1, color: { r: 0, g: 255, b: 0 } }] }],
+      thumbnail: 'seq123',
+      icon: 'mdi:music',
+    } as any;
+    const html = renderToHTML(renderPresetIcon(ref, preset, true));
+    expect(html).toContain('thumbnails/seq123');
+    expect(html).not.toContain('mdi:music');
+  });
+
+  it('user segment sequence with an icon and no thumbnail shows the icon', () => {
+    const ref: FavoritePresetRef = { type: 'segment_sequence', id: 's1' };
+    const preset = {
+      id: 's1', name: 'Chase',
+      steps: [{ segment_colors: [{ segment: 1, color: { r: 0, g: 255, b: 0 } }] }],
+      icon: 'mdi:music',
+    } as any;
+    const html = renderToHTML(renderPresetIcon(ref, preset, true));
+    expect(html).toContain('mdi:music');
+    expect(html).not.toContain('thumbnails/');
+  });
+
+  it('user segment sequence with neither thumbnail nor icon shows the generated SVG', () => {
+    const ref: FavoritePresetRef = { type: 'segment_sequence', id: 's1' };
+    const preset = {
+      id: 's1', name: 'Chase',
+      steps: [{ segment_colors: [{ segment: 1, color: { r: 0, g: 255, b: 0 } }] }],
+    } as any;
+    const html = renderToHTML(renderPresetIcon(ref, preset, true));
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('thumbnails/');
+  });
 });

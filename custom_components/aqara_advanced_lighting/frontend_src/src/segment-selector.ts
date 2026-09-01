@@ -29,6 +29,8 @@ import { addColorToHistory } from './color-history';
 import { dialogActions, localize, renderInput, DEFAULT_PALETTE, DEFAULT_GRADIENT_COLORS, DEFAULT_BLOCK_COLORS } from './editor-constants';
 import { ReorderableStepsMixin, reorderableStepStyles, ReorderableStepItem } from './reorderable-steps-mixin';
 import './color-history-swatches';
+import './image-extract-button';
+import type { ColorsExtractedDetail } from './image-color-extractor';
 
 // Component mode types
 type SegmentSelectorMode = 'selection' | 'color' | 'sequence';
@@ -65,6 +67,18 @@ export class SegmentSelector extends ReorderableStepsMixin(LitElement) {
   @property({ type: Array }) zones: SegmentZoneResolved[] = [];
   @property({ type: Boolean }) turnOffUnspecified = true;
   @property({ type: Boolean }) hideControls = false;
+
+  /**
+   * Opt in to the image extraction buttons.
+   *
+   * Off by default. `_renderColorPalette()` already suppresses all colour UI
+   * unless mode is 'color' or 'sequence', so effect-editor and config-tab
+   * (both mode='selection') cannot show these buttons -- but that gating is
+   * invisible at the call site, and a future host rendering this component in
+   * 'color' mode would silently inherit them. Only pattern-editor and
+   * segment-sequence-editor set this.
+   */
+  @property({ type: Boolean }) enableImageExtraction = false;
 
   protected override _reorderLayout: 'list' | 'grid' = 'grid';
 
@@ -489,6 +503,60 @@ export class SegmentSelector extends ReorderableStepsMixin(LitElement) {
       .color-array.is-dragging .add-color-btn {
         pointer-events: none;
         opacity: 0.4;
+      }
+
+      /*
+       * Same suppression for the extract trigger, which the rule above cannot
+       * reach: image-extract-button keeps its trigger inside a shadow root, so
+       * .add-color-btn never matches it. Both halves here work by inheritance,
+       * which is the only thing that crosses a shadow boundary.
+       *
+       * pointer-events is itself an inherited property, so setting it on the
+       * element host reaches the trigger directly.
+       *
+       * Fading needs the indirection, and cannot be a plain opacity here. The
+       * element sets :host { display: contents }, so it generates no box at
+       * all, and opacity applies to a box and does not inherit -- an opacity
+       * declaration on this host would be silently discarded. Custom properties
+       * do inherit, so the fade is passed as a value the element applies to its
+       * own trigger, which does have a box: .compact-trigger (and the non-
+       * compact variant) read opacity: var(--aqara-extract-trigger-opacity, 1).
+       * The property name is a contract shared with image-extract-button.ts and
+       * effect-editor.ts; a mismatch fails silently in both directions.
+       */
+      .color-array.is-dragging image-extract-button {
+        pointer-events: none;
+        --aqara-extract-trigger-opacity: 0.4;
+      }
+
+      /*
+       * Vertical alignment for the extract trigger, which is a bare 52px tile
+       * (48px + 2px border) sitting among taller column stacks in rows that use
+       * align-items: center. Passed as custom properties because the element is
+       * display: contents and has no box to give margin to from here; it
+       * applies them to its own tile. See image-extract-button.ts.
+       *
+       * Gradient and Blocks: a .color-item is 20px handle + 4px gap + 52px
+       * swatch + 4px gap + 26px remove button = 106px, so the swatch centre
+       * sits 3px above the stack centre. Reserving the same 24px above and 30px
+       * below gives the trigger a 106px margin box and puts its tile on exactly
+       * the same centre line.
+       */
+      .color-array image-extract-button {
+        --aqara-extract-trigger-space-top: 24px;
+        --aqara-extract-trigger-space-bottom: 30px;
+      }
+
+      /*
+       * Individual palette: a .palette-color-wrapper is 54px swatch (48px + 3px
+       * border) + 4px gap + 26px edit button = 84px, with nothing above the
+       * swatch, so the swatch centre sits 15px above the wrapper centre --
+       * the largest of the three offsets. Reserving 30px below alone
+       * reproduces that 15px, and no top space is needed since these stacks
+       * have no drag handle.
+       */
+      .color-palette image-extract-button {
+        --aqara-extract-trigger-space-bottom: 30px;
       }
 
       .add-color-btn {
@@ -1716,6 +1784,103 @@ export class SegmentSelector extends ReorderableStepsMixin(LitElement) {
   }
 
   /**
+   * Image extraction
+   */
+  private _renderExtractButton(
+    maxColors: number,
+    allowProjection: boolean,
+    onExtracted: (e: CustomEvent<ColorsExtractedDetail>) => void,
+  ): TemplateResult | string {
+    if (!this.enableImageExtraction) return '';
+    return html`
+      <image-extract-button
+        .hass=${this.hass}
+        .translations=${this.translations}
+        .maxColors=${maxColors}
+        .segments=${this.maxSegments}
+        .allowProjection=${allowProjection}
+        .showBrightness=${false}
+        .compact=${true}
+        @colors-extracted=${onExtracted}
+      ></image-extract-button>
+    `;
+  }
+
+  private _extractedToXy(detail: ColorsExtractedDetail): XYColor[] {
+    return detail.colors
+      .filter((c): c is NonNullable<typeof c> => c !== null)
+      .map(c => ({ x: c.x, y: c.y }));
+  }
+
+  private _handleGradientExtracted(e: CustomEvent<ColorsExtractedDetail>): void {
+    // This element is the boundary for colors-extracted: image-extract-button
+    // re-dispatches it composed and bubbling, so without this a host listening
+    // further up would handle the same extraction a second time.
+    e.stopPropagation();
+    const colors = this._extractedToXy(e.detail);
+    if (colors.length === 0) return;
+    // Gradient needs at least two stops; pad rather than emit an invalid array.
+    while (colors.length < 2) colors.push(getComplementaryColor(colors[colors.length - 1]!));
+    this.gradientColors = colors.slice(0, 6);
+    this._fireGradientColorsChanged();
+    this._forwardThumbnail(e.detail);
+  }
+
+  private _handleBlocksExtracted(e: CustomEvent<ColorsExtractedDetail>): void {
+    e.stopPropagation();
+    const colors = this._extractedToXy(e.detail);
+    if (colors.length === 0) return;
+    this.blockColors = colors.slice(0, 6);
+    this._fireBlockColorsChanged();
+    this._forwardThumbnail(e.detail);
+  }
+
+  private _handleIndividualExtracted(e: CustomEvent<ColorsExtractedDetail>): void {
+    e.stopPropagation();
+    if (e.detail.mode === 'projection') {
+      // Position is meaningful: entry i is segment i. Nulls are near-black
+      // columns and are left unspecified rather than coloured.
+      const next = new Map<number, XYColor>();
+      e.detail.colors.forEach((c, index) => {
+        if (c && index < this.maxSegments) next.set(index, { x: c.x, y: c.y });
+      });
+      // An image whose every sampled column falls under the dark threshold
+      // yields no lit segments. Emitting that empty map would clear every
+      // segment the user had painted, with no undo, and in the sequence editor
+      // the empty map then falls through to the 'all' segments default. Treat
+      // it as a no-op instead: this mirrors the length === 0 guards in the two
+      // palette branches below, and a user who genuinely wants everything off
+      // has Clear all. Not redundant -- do not remove.
+      if (next.size === 0) return;
+      this.colorValue = next;
+      this._coloredSegments = new Map(next);
+      this._fireColorValueChanged();
+    } else {
+      const colors = this._extractedToXy(e.detail);
+      if (colors.length === 0) return;
+      // The palette is fixed at six slots and has no add/remove UI, so pad
+      // rather than shrink it -- shrinking would strand _selectedPaletteIndex.
+      const padded = [...colors];
+      while (padded.length < DEFAULT_PALETTE.length) {
+        padded.push(getComplementaryColor(padded[padded.length - 1]!));
+      }
+      this.colorPalette = padded.slice(0, DEFAULT_PALETTE.length);
+      this._fireColorPaletteChanged();
+    }
+    this._forwardThumbnail(e.detail);
+  }
+
+  /** Re-emit the thumbnail id so the host editor can store it on its preset. */
+  private _forwardThumbnail(detail: ColorsExtractedDetail): void {
+    if (!detail.thumbnailId) return;
+    this.dispatchEvent(new CustomEvent('extracted-thumbnail', {
+      detail: { thumbnailId: detail.thumbnailId },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  /**
    * Rendering methods
    */
   private _renderGrid(): TemplateResult {
@@ -1965,6 +2130,9 @@ export class SegmentSelector extends ReorderableStepsMixin(LitElement) {
             </button>
           </div>
         `)}
+        ${this._renderExtractButton(
+          DEFAULT_PALETTE.length, true, this._handleIndividualExtracted,
+        )}
       </div>
       <div class="generated-actions">
         <ha-button
@@ -2020,6 +2188,7 @@ export class SegmentSelector extends ReorderableStepsMixin(LitElement) {
             <div class="color-remove-spacer"></div>
           </div>
         ` : ''}
+        ${this._renderExtractButton(6, false, this._handleGradientExtracted)}
       </div>
       <div class="options-group">
         <div class="options-row">
@@ -2149,6 +2318,7 @@ export class SegmentSelector extends ReorderableStepsMixin(LitElement) {
             <div class="color-remove-spacer"></div>
           </div>
         ` : ''}
+        ${this._renderExtractButton(6, false, this._handleBlocksExtracted)}
       </div>
       <div class="options-group">
         <div class="options-row">

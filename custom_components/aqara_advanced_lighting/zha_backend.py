@@ -205,6 +205,7 @@ class ZHABackend:
         self.entry = entry
         self._entity_controller = entity_controller
         self._entity_to_ieee: dict[str, str] = {}
+        self._mapping_retry_task: asyncio.Task | None = None
 
     # --- Lifecycle ---
 
@@ -262,6 +263,7 @@ class ZHABackend:
                 model=MODEL_FRIENDLY_NAMES.get(model_id, model_id),
                 model_id=model_id,
                 sw_version=getattr(device, "firmware_version", None),
+                via_device_id=self._zha_via_device_id(device_registry, ieee_str),
             )
 
             _LOGGER.debug(
@@ -293,7 +295,7 @@ class ZHABackend:
                 "scheduling entity mapping retry",
                 len(self.entry.runtime_data.aqara_devices),
             )
-            self.hass.async_create_task(self._async_retry_entity_mapping())
+            self._schedule_mapping_retry()
 
     def _zha_config_entry_id(self) -> str | None:
         """Return the ZHA config entry id, or None if ZHA is not set up.
@@ -304,6 +306,33 @@ class ZHABackend:
         """
         zha_entries = self.hass.config_entries.async_entries("zha")
         return zha_entries[0].entry_id if zha_entries else None
+
+    def _zha_via_device_id(
+        self, device_registry: dr.DeviceRegistry, ieee_str: str
+    ) -> str | None:
+        """Return the device id of the ZHA device we shadow, if it is known.
+
+        Since 2026.8 our device is a card of its own rather than part of the
+        light's. Naming the ZHA device as our via device gives our card a
+        "Connected via" link back to the light.
+
+        None before 2026.8, where we merge into ZHA's device instead and a via
+        link would point at ourselves. Also None when ZHA's own device is not
+        registered yet: async_get_or_create raises DeviceInfoError for a
+        via_device_id that is not a registered device, so the link cannot be
+        guessed. Passing None also clears a link whose device has gone.
+        """
+        if not _SINGLE_CONFIG_ENTRY_REGISTRY:
+            return None
+
+        zha_entry_id = self._zha_config_entry_id()
+        if zha_entry_id is None:
+            return None
+
+        zha_device = device_registry.async_get_device_by_identifier(
+            ("zha", ieee_str), zha_entry_id
+        )
+        return zha_device.id if zha_device else None
 
     def _remove_stale_devices(self, seen_ieee: set[str]) -> None:
         """Remove devices no longer present in ZHA from the HA device registry."""
@@ -394,6 +423,18 @@ class ZHABackend:
         else:
             self.entry.runtime_data.entity_mapping_ready = False
 
+    def _schedule_mapping_retry(self) -> None:
+        """Start the mapping retry unless one is already running."""
+        if self._mapping_retry_task is not None and not self._mapping_retry_task.done():
+            return
+        # Background: this must not hold up config entry setup, and a retry
+        # left on the pending task list would block anything waiting on it
+        # for the full retry window.
+        self._mapping_retry_task = self.hass.async_create_background_task(
+            self._async_retry_entity_mapping(),
+            "aqara_advanced_lighting_zha_entity_mapping_retry",
+        )
+
     async def _async_retry_entity_mapping(self) -> None:
         """Retry entity mapping after ZHA finishes creating entities.
 
@@ -421,6 +462,9 @@ class ZHABackend:
 
     async def async_shutdown(self) -> None:
         """Shut down the backend and clean up resources."""
+        if self._mapping_retry_task is not None:
+            self._mapping_retry_task.cancel()
+            self._mapping_retry_task = None
         self._entity_to_ieee.clear()
         _LOGGER.debug("ZHA backend shut down")
 

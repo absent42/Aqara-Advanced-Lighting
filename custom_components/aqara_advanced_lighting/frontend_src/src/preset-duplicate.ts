@@ -152,3 +152,27 @@ export function builtinDynamicSceneToUser(
   }
   return result;
 }
+
+/**
+ * Build the pre-filled copy used when duplicating an existing user preset.
+ *
+ * Mirrors the backend's `duplicate_preset()` in preset_store.py: the identity
+ * and timestamp fields are cleared, and `thumbnail` is deliberately dropped.
+ * Thumbnail files are not duplicated on disk, so carrying the id across would
+ * leave two presets referencing one file -- deleting either would unlink it and
+ * leave the survivor with a broken image. The copy falls back to the preset
+ * type's generated SVG (or its icon, which is preserved), and the user can
+ * re-extract an image if they want one.
+ */
+export function userPresetToDuplicate<
+  T extends { id: string; name: string; created_at: string; modified_at: string; thumbnail?: string },
+>(preset: T, copyLabel: string): T {
+  return {
+    ...preset,
+    id: '',
+    name: `${preset.name} ${copyLabel}`,
+    created_at: '',
+    modified_at: '',
+    thumbnail: undefined,
+  };
+}

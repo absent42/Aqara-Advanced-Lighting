@@ -12,8 +12,10 @@ import { localize, renderInput } from './editor-constants';
 const API_BASE = '/api/aqara_advanced_lighting';
 
 export interface ColorsExtractedDetail {
-  colors: DynamicSceneColor[];
+  /** Null entries appear only in projection mode, for near-black columns. */
+  colors: (DynamicSceneColor | null)[];
   thumbnailId?: string;
+  mode: 'palette' | 'projection';
 }
 
 @customElement('image-color-extractor')
@@ -21,9 +23,32 @@ export class ImageColorExtractor extends LitElement {
   @property({ attribute: false }) public hass!: HomeAssistant;
   @property({ type: Object }) public translations: Translations = {};
 
-  @property({ type: String }) public mode: 'upload' | 'url' = 'upload';
+  /**
+   * Input method: pick a local file, or fetch a remote URL. This selects which
+   * request the component sends. Not to be confused with `extractionMode`,
+   * which is what the server does with the image once it has it, and which is
+   * the value sent as the request's `mode` field.
+   */
+  @property({ type: String }) public source: 'upload' | 'url' = 'upload';
+  /** Colour-slot capacity of the target array. Drives num_colors. */
+  @property({ type: Number }) public maxColors = 8;
+  /** 'palette' quantises dominant colours; 'projection' samples across segments. */
+  @property({ type: String }) public extractionMode: 'palette' | 'projection' = 'palette';
+  /** Strip segment count, used only in projection mode. */
+  @property({ type: Number }) public segments = 0;
+  /**
+   * Whether to offer the brightness toggle. False for panels with no
+   * per-colour brightness (segment patterns and sequences).
+   */
+  @property({ type: Boolean }) public showBrightness = true;
   @state() private _url = '';
   @state() private _saveThumbnail = true;
+  /**
+   * Projection only: leave near-black columns unlit. On by default, matching
+   * the server default. Turning it off fills every segment, at the cost of
+   * dark regions rendering at full output -- see _extract_projection.
+   */
+  @state() private _skipDark = true;
   @state() private _extractBrightness = false;
   @state() public extracting = false;
   @state() private _error = '';
@@ -38,8 +63,8 @@ export class ImageColorExtractor extends LitElement {
   protected render(): TemplateResult {
     return html`
       <div class="extractor-container">
-        <!-- Upload mode -->
-        ${this.mode === 'upload' ? html`
+        <!-- Upload source -->
+        ${this.source === 'upload' ? html`
           <div
             class="drop-zone ${this._previewSrc ? 'has-preview' : ''}"
             @click=${this._triggerFileInput}
@@ -67,7 +92,7 @@ export class ImageColorExtractor extends LitElement {
             @change=${this._handleFileSelected}
           />
         ` : html`
-          <!-- URL mode -->
+          <!-- URL source -->
           <div class="url-input-row">
             ${renderInput({
               value: this._url,
@@ -79,6 +104,7 @@ export class ImageColorExtractor extends LitElement {
         `}
 
         <!-- Options -->
+        ${this.showBrightness ? html`
         <div class="option-row">
           <label class="option-toggle">
             <ha-switch
@@ -88,6 +114,19 @@ export class ImageColorExtractor extends LitElement {
             <span>${this._localize('image_extractor.extract_brightness')}</span>
           </label>
         </div>
+        ` : ''}
+        ${this.extractionMode === 'projection' ? html`
+        <div class="option-row">
+          <label class="option-toggle">
+            <ha-switch
+              .checked=${this._skipDark}
+              @change=${this._handleSkipDarkToggle}
+            ></ha-switch>
+            <span>${this._localize('image_extractor.skip_dark')}</span>
+          </label>
+        </div>
+        <div class="option-hint">${this._localize('image_extractor.skip_dark_hint')}</div>
+        ` : ''}
         <div class="option-row">
           <label class="option-toggle">
             <ha-switch
@@ -108,7 +147,7 @@ export class ImageColorExtractor extends LitElement {
   }
 
   public hasInput(): boolean {
-    if (this.mode === 'upload') return !!this._previewSrc;
+    if (this.source === 'upload') return !!this._previewSrc;
     return !!this._url.trim();
   }
 
@@ -172,6 +211,10 @@ export class ImageColorExtractor extends LitElement {
     this._saveThumbnail = (e.target as HTMLInputElement).checked;
   }
 
+  private _handleSkipDarkToggle(e: Event): void {
+    this._skipDark = (e.target as HTMLInputElement).checked;
+  }
+
   public async extract(): Promise<void> {
     if (this.extracting) return;
 
@@ -181,7 +224,7 @@ export class ImageColorExtractor extends LitElement {
     try {
       let response: Response;
 
-      if (this.mode === 'upload') {
+      if (this.source === 'upload') {
         if (!this._selectedFile) {
           this._error = this._localize('image_extractor.error_no_file') || 'No file selected';
           return;
@@ -189,9 +232,15 @@ export class ImageColorExtractor extends LitElement {
 
         const formData = new FormData();
         formData.append('file', this._selectedFile);
-        formData.append('num_colors', '8');
+        formData.append('num_colors', String(this.maxColors));
         formData.append('save_thumbnail', this._saveThumbnail ? 'true' : 'false');
-        formData.append('extract_brightness', this._extractBrightness ? 'true' : 'false');
+        formData.append(
+          'extract_brightness',
+          this.showBrightness && this._extractBrightness ? 'true' : 'false',
+        );
+        formData.append('mode', this.extractionMode);
+        formData.append('segments', String(this.segments));
+        formData.append('skip_dark', this._skipDark ? 'true' : 'false');
 
         response = await this.hass.fetchWithAuth(`${API_BASE}/extract_colors`, {
           method: 'POST',
@@ -205,9 +254,12 @@ export class ImageColorExtractor extends LitElement {
           },
           body: JSON.stringify({
             url: this._url.trim(),
-            num_colors: 8,
+            num_colors: this.maxColors,
             save_thumbnail: this._saveThumbnail,
-            extract_brightness: this._extractBrightness,
+            extract_brightness: this.showBrightness && this._extractBrightness,
+            mode: this.extractionMode,
+            segments: this.segments,
+            skip_dark: this._skipDark,
           }),
         });
       }
@@ -219,13 +271,11 @@ export class ImageColorExtractor extends LitElement {
       }
 
       const result = await response.json();
-      const colors: DynamicSceneColor[] = result.colors.map((c: any) => ({
-        x: c.x,
-        y: c.y,
-        brightness_pct: c.brightness_pct,
-      }));
+      const colors: (DynamicSceneColor | null)[] = result.colors.map((c: any) =>
+        c === null ? null : { x: c.x, y: c.y, brightness_pct: c.brightness_pct },
+      );
 
-      const detail: ColorsExtractedDetail = { colors };
+      const detail: ColorsExtractedDetail = { colors, mode: this.extractionMode };
       if (result.thumbnail_id) {
         detail.thumbnailId = result.thumbnail_id;
       }
@@ -334,6 +384,12 @@ export class ImageColorExtractor extends LitElement {
     .option-row {
       display: flex;
       align-items: center;
+    }
+
+    .option-hint {
+      font-size: 12px;
+      color: var(--secondary-text-color);
+      margin-top: -8px;
     }
 
     .option-toggle {

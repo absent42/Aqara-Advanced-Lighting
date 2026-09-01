@@ -507,3 +507,31 @@ async def async_reload_entry(
     """Reload config entry."""
     await async_unload_entry(hass, entry)
     await async_setup_entry(hass, entry)
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: AqaraLightingConfigEntry,
+    device_entry: dr.DeviceEntry,
+) -> bool:
+    """Allow deleting a device the backend no longer reports.
+
+    Defining this is what sets ConfigEntry.supports_remove_device, which is
+    what puts a delete action on the device page. It matters from HA 2026.8:
+    a device belongs to a single config entry, so ours is no longer shared
+    with the MQTT/ZHA device and no other integration offers a way to remove
+    it.
+
+    A device the backend still reports is refused. Setup re-creates it on the
+    next discovery, so accepting the delete would silently do nothing.
+    """
+    runtime_data = getattr(config_entry, "runtime_data", None)
+    if runtime_data is None:
+        # Entry never finished setting up (failed, disabled or unloaded), so
+        # no backend claims the device and the user may clear it.
+        return True
+
+    return not any(
+        identifier_domain == DOMAIN
+        and identifier_value in runtime_data.aqara_devices
+        for identifier_domain, identifier_value in device_entry.identifiers
+    )

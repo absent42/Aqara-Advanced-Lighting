@@ -2,6 +2,35 @@
 
 All notable changes to the Aqara Advanced Lighting integration will be documented in this file.
 
+## [1.3.3] - unreleased
+
+### Added
+
+  - Each Aqara Advanced Lighting device page now shows a "Connected via" link back to the Zigbee2MQTT or ZHA device for the same bulb, so the two cards 2026.8 splits apart read as related rather than as unrelated siblings. The link appears once Zigbee2MQTT or ZHA has registered its own device; if ours is registered first, it is filled in shortly afterwards.
+  - Colours can now be extracted from an image in the effects, segment pattern and segment sequence editors, not just dynamic scenes. The button sits beside each colour row, so which colours it fills is decided by where you press it: in the segment editors that means the gradient stops, the block colours or the paint palette, and in a segment sequence it applies to the step you pressed it in rather than the whole sequence.
+  - Segment patterns and sequences can also project an image across the strip rather than sampling a palette from it. The image is divided into as many vertical slices as the strip has segments and mapped left to right, so a photograph reads across the strip. This is offered in the Individual tab only, where segments are addressed one by one; the gradient and blocks modes generate their own spread across the strip, so a projection would be resampled away by them.
+  - Because segments carry a colour but not a brightness, a dark part of an image would otherwise light its segment at full brightness. Projection therefore leaves segments below a perceived-brightness threshold unlit, which is what produces gaps on a high-contrast image. A "Leave dark areas unlit" switch in the extract dialog turns that off if you would rather fill every segment, at the cost of dark regions being lit at full brightness and black or grey ones showing as white.
+  - Effect, segment pattern and segment sequence presets can now keep the image as their thumbnail, as dynamic scenes already could, and show it on their card in place of the generated colour swatch. This only happens if you tick "Use image as preset thumbnail" when extracting; presets without one are unchanged. An image takes precedence over a preset's icon, matching how dynamic scenes already behave, since an uploaded image is a deliberate choice whereas the icon is often left at its default.
+  - The device page for an Aqara Advanced Lighting device now has a delete action. Since 2026.8 the devices are AAL's alone, so no other integration offered a way to remove one; a light dropped from Zigbee2MQTT or ZHA while Home Assistant was stopped left a device page that could not be cleared by hand. Deleting a device the backend still reports is refused, because setup re-creates it on the next discovery.
+
+### Fixed
+
+  - "Turn off unspecified segments" was discarded whenever a segment pattern was saved, and reverted to its default on reload. The setting was sent by the editor but not on the list of fields the preset store accepts, so it was dropped without an error.
+  - "Skip first step in loop" was discarded the same way on segment sequences. This one has never worked: the editor reads the value back when loading a preset and the sequence manager acts on it, but the value could not be stored in the first place.
+  - Duplicating a preset that had an image thumbnail gave both copies the same image file, so deleting either one left the other showing a broken image. A duplicate now starts without a thumbnail, matching what duplicating already did through the API.
+  - Six tooltips in the colour and step controls, and the transition curve's title and subtitle, displayed their translation key rather than their text. They were being looked up against the wrong translation file; Home Assistant does not serve a custom integration's non-standard sections to the interface, so those lookups could never have resolved. Affected the dynamic scene colour swatches, the segment sequence step buttons, and the standard steps of a CCT sequence -- its solar and schedule steps were unaffected.
+  - Colour swatches announced their key rather than a label to screen readers, reading "editors.color_label 1" in place of "Color 1". The colour history swatches had the same fault.
+  - Preset thumbnails other than dynamic scenes would have been deleted at the next Home Assistant restart. Startup cleanup removes thumbnail files that no preset refers to, but only looked at dynamic scenes when deciding what was still in use. Harmless until now, because no other preset type could have one.
+  - The Zigbee2MQTT backend no longer reports setup as complete when it has found bulbs but matched no Home Assistant light entities to them. Zigbee2MQTT's device list is a retained message, so it can arrive before the MQTT integration has created the lights it describes; the panel showed setup as finished while no light was controllable. It now waits, retrying for 30 seconds, and says so in the log if the lights never appear. The ZHA backend already behaved this way.
+  - A "Connected via" link missing because our device was registered before the Zigbee2MQTT one is now filled in by the same retry, rather than waiting for a device to join or leave the network.
+  - The ZHA backend's entity mapping retry is now stopped when the integration unloads. It ran for up to 30 seconds and was left running across a reload, where it kept writing to the unloaded entry's data.
+
+### Internal
+
+  - A firmware version reported by Zigbee2MQTT as a number rather than text is now converted before being stored. Home Assistant currently converts it and logs a deprecation; it stops doing so in 2026.12.
+  - Removed a request published to `zigbee2mqtt/bridge/request/devices` on every setup. No such topic exists in Zigbee2MQTT, so the request was ignored. Device discovery is unaffected: Zigbee2MQTT publishes `bridge/devices` retained and republishes it whenever a device joins or leaves.
+  - The pre-2026.8 device merge path passes a complete `new_identifiers` set instead of the deprecated `merge_identifiers`, which Home Assistant removes in 2027.9. No behaviour change; the path is only reached on cores older than 2026.8.
+
 ## [1.3.2] - 2026-08-05
 
 ### Minimum Home Assistant version is now 2026.6
@@ -2064,3 +2093,5 @@ One click HACS cutton
 [1.1.0]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.1.0
 [1.2.0]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.2.0
 [1.3.0]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.0
+[1.3.1]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.1
+[1.3.2]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.2

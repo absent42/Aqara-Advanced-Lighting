@@ -424,11 +424,13 @@ export class AqaraPresetFavoritesCardEditor extends LitElement {
       flex-shrink: 0;
     }
     .curation-icon ha-icon,
-    .curation-icon img {
+    .curation-icon img,
+    .curation-icon svg {
       width: 100%;
       height: 100%;
       --mdc-icon-size: 32px;
       object-fit: contain;
+      border-radius: 50%;
     }
     .curation-name {
       flex: 1;

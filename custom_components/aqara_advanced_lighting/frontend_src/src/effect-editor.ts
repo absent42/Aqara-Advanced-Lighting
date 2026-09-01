@@ -8,6 +8,9 @@ import { ALL_DEVICE_LABELS, editorFormStyles, localize, dialogActions } from './
 import { ReorderableStepsMixin, reorderableStepStyles, ReorderableStepItem } from './reorderable-steps-mixin';
 import './xy-color-picker';
 import './color-history-swatches';
+import './image-extract-button';
+import type { ColorsExtractedDetail } from './image-color-extractor';
+import { adoptThumbnail, discardUnsaved } from './thumbnail-lifecycle';
 
 // Wrapper for XYColor with unique ID required by ReorderableStepsMixin
 interface DraggableColor extends XYColor, ReorderableStepItem {}
@@ -53,6 +56,7 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
   @state() private _effect = '';
   @state() private _speed = 50;
   @state() private _brightness = 100;
+  @state() private _thumbnail?: string;
   // _steps is used by ReorderableStepsMixin; alias as _colors for clarity
   @state() protected _steps: DraggableColor[] = [{ x: 0.6800, y: 0.3100, id: 'initial-0' }];
 
@@ -141,6 +145,31 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
 
     /* .color-remove and .add-color-btn inherited from colorPickerStyles (styles.ts) */
 
+    /* Suppress the extract trigger during a colour drag, matching the
+       neighbouring tiles. colorPickerStyles' .add-color-btn rule cannot reach
+       the trigger, which lives in image-extract-button's shadow root, so both
+       declarations here work by inheriting across that boundary: pointer-events
+       is an inherited property, and the custom property feeds the element's own
+       opacity: var(--aqara-extract-trigger-opacity, 1). A direct opacity would
+       do nothing, because the element sets :host { display: contents } and so
+       generates no box for it to act on. */
+    .color-picker-grid.is-dragging image-extract-button {
+      pointer-events: none;
+      --aqara-extract-trigger-opacity: 0.4;
+    }
+
+    /* Vertical alignment for the compact extract trigger, same contract and
+       same reason as the fade above: the element is display: contents, so the
+       spacing is passed as custom properties for it to apply to its own tile.
+       This grid's stacks match segment-selector's gradient and blocks rows --
+       20px handle + 4px gap + 52px swatch + 4px gap + 26px remove = 106px --
+       so the trigger reserves 24px above and 30px below to reach the same
+       106px and share the swatches' centre line. */
+    .color-picker-grid image-extract-button {
+      --aqara-extract-trigger-space-top: 24px;
+      --aqara-extract-trigger-space-bottom: 30px;
+    }
+
     .boolean-left ha-selector {
       display: flex;
       justify-content: flex-start;
@@ -184,6 +213,7 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
     this._effect = preset.effect;
     this._speed = preset.effect_speed;
     this._brightness = preset.effect_brightness || 100;
+    this._thumbnail = preset.thumbnail;
     // Handle both XY (new) and RGB (legacy) color formats
     this._colors = this._toColors(preset.effect_colors.map((c: XYColor | RGBColor) => {
       if ('x' in c && 'y' in c) {
@@ -221,6 +251,7 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
       effect: this._effect,
       speed: this._speed,
       brightness: this._brightness,
+      thumbnail: this._thumbnail,
       colors: this._colors.map(c => ({ x: c.x, y: c.y })),
       segments: this._segments,
       hasUserInteraction: this._hasUserInteraction,
@@ -236,12 +267,17 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
   }
 
   public resetToDefaults(): void {
+    // Drop any thumbnail extracted but never persisted. The DELETE endpoint is
+    // idempotent and only evicts in-memory pending entries, so it is safe when
+    // _cancel() has already discarded the same id on the way here.
+    discardUnsaved(this.hass, this._thumbnail, this.preset?.thumbnail);
     this._name = '';
     this._icon = '';
     this._deviceType = 't2_bulb';
     this._effect = '';
     this._speed = 50;
     this._brightness = 100;
+    this._thumbnail = undefined;
     this._colors = this._toColors([{ x: 0.6800, y: 0.3100 }]);
     this._segments = '';
     this._hasUserInteraction = false;
@@ -261,6 +297,7 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
     this._effect = draft.effect;
     this._speed = draft.speed;
     this._brightness = draft.brightness;
+    this._thumbnail = draft.thumbnail;
     this._colors = this._toColors(draft.colors);
     this._segments = draft.segments;
     this._hasUserInteraction = draft.hasUserInteraction ?? false;
@@ -368,6 +405,29 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
     }
   }
 
+  private _handleColorsExtracted(e: CustomEvent<ColorsExtractedDetail>): void {
+    const { colors, thumbnailId } = e.detail;
+    const extracted = colors.filter((c): c is NonNullable<typeof c> => c !== null);
+    if (extracted.length === 0) return;
+
+    this._colors = this._toColors(extracted.map(c => ({ x: c.x, y: c.y })));
+
+    // Effects have a single global brightness, so fold the per-colour values
+    // the backend returns into one average.
+    const withBrightness = extracted.filter(c => typeof c.brightness_pct === 'number');
+    if (withBrightness.length > 0) {
+      const mean =
+        withBrightness.reduce((sum, c) => sum + c.brightness_pct, 0) / withBrightness.length;
+      this._brightness = Math.max(1, Math.min(100, Math.round(mean)));
+    }
+
+    this._thumbnail = adoptThumbnail(
+      this.hass, this._thumbnail, thumbnailId, this.preset?.thumbnail,
+    );
+
+    this._hasUserInteraction = true;
+  }
+
   protected override _reorderStep(fromIndex: number, toIndex: number): void {
     super._reorderStep(fromIndex, toIndex);
     this._hasUserInteraction = true;
@@ -429,6 +489,7 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
     const data: Record<string, unknown> = {
       name: this._name,
       icon: this._icon || undefined,
+      thumbnail: this._thumbnail || undefined,
       device_type: this._deviceType,
       effect: this._effect,
       effect_speed: this._speed,
@@ -501,6 +562,8 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
   }
 
   private _cancel(): void {
+    // Clean up an extracted thumbnail that was never persisted to a preset
+    discardUnsaved(this.hass, this._thumbnail, this.preset?.thumbnail);
     this._hasUserInteraction = false;
     this.dispatchEvent(
       new CustomEvent('cancel', {
@@ -697,6 +760,15 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
               </div>
               <div class="color-remove-spacer"></div>
             </div>
+            <image-extract-button
+              .hass=${this.hass}
+              .translations=${this.translations}
+              .maxColors=${8}
+              .allowProjection=${false}
+              .showBrightness=${true}
+              .compact=${true}
+              @colors-extracted=${this._handleColorsExtracted}
+            ></image-extract-button>
           </div>
         </div>
 

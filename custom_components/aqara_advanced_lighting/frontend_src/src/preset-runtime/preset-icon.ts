@@ -82,7 +82,10 @@ function renderUserEffectIcon(preset: UserEffectPreset, showBadge: boolean): Tem
   // Apply the badge in both the icon-set and thumbnail branches, mirroring the
   // panel's My Effects display behavior at aqara-panel.ts:4143-4144.
   const isAudio = showBadge && !!preset.audio_config?.audio_speed_mode;
-  if (preset.icon) {
+  // Precedence: uploaded thumbnail > MDI/file icon > auto-generated SVG.
+  // An uploaded thumbnail is a deliberate visual choice; the icon field is often
+  // a leftover MDI default from preset creation. Mirrors aqara-panel.ts.
+  if (preset.icon && !preset.thumbnail) {
     return withAudioBadge(renderBuiltinIcon(preset.icon, 'mdi:lightbulb-on'), isAudio);
   }
   const thumb = renderEffectThumbnail(preset)
@@ -105,7 +108,10 @@ function renderBuiltinEffectIcon(preset: DynamicEffectPreset, showBadge: boolean
 
 /** Render a user segment pattern preset icon. (panel:4525-4531) */
 function renderUserPatternIcon(preset: UserSegmentPatternPreset): TemplateResult {
-  if (preset.icon) {
+  // Precedence: uploaded thumbnail > MDI/file icon > auto-generated SVG.
+  // An uploaded thumbnail is a deliberate visual choice; the icon field is often
+  // a leftover MDI default from preset creation. Mirrors aqara-panel.ts.
+  if (preset.icon && !preset.thumbnail) {
     return renderBuiltinIcon(preset.icon, 'mdi:palette');
   }
   return renderSegmentPatternThumbnail(preset)
@@ -123,7 +129,10 @@ function renderUserCCTIcon(preset: UserCCTSequencePreset): TemplateResult {
 
 /** Render a user segment sequence preset icon. (panel:4543-4549) */
 function renderUserSegmentSequenceIcon(preset: UserSegmentSequencePreset): TemplateResult {
-  if (preset.icon) {
+  // Precedence: uploaded thumbnail > MDI/file icon > auto-generated SVG.
+  // An uploaded thumbnail is a deliberate visual choice; the icon field is often
+  // a leftover MDI default from preset creation. Mirrors aqara-panel.ts.
+  if (preset.icon && !preset.thumbnail) {
     return renderBuiltinIcon(preset.icon, 'mdi:animation-play');
   }
   return renderSegmentSequenceThumbnail(preset)

@@ -210,6 +210,36 @@ function wrapSvg(innerContent: string): string {
 
 
 // ---------------------------------------------------------------------------
+// Stored image thumbnail -- shared by every preset type that can carry one
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a stored image thumbnail, if the preset has one.
+ *
+ * An image replaces the generated SVG preview rather than accompanying it.
+ * That costs the at-a-glance colour readout, which is acceptable because it is
+ * opt-in: the "Use image as preset thumbnail" toggle is off unless the user
+ * ticks it, so a preset only loses its swatch when that was asked for.
+ *
+ * Sizing comes from the surrounding container, which styles img and svg
+ * identically (width/height 100%, circular); the inline object-fit overrides
+ * the containers' default of contain so the image crops to fill the circle
+ * the way the generated SVGs do.
+ */
+function renderImageThumbnail(
+  preset: { thumbnail?: string } | unknown,
+): TemplateResult | null {
+  const thumbId = (preset as { thumbnail?: string })?.thumbnail;
+  if (!thumbId) return null;
+  return html`<img
+    src="/api/aqara_advanced_lighting/thumbnails/${thumbId}"
+    alt="Preset thumbnail"
+    style="object-fit:cover"
+  />`;
+}
+
+
+// ---------------------------------------------------------------------------
 // Public render functions
 // ---------------------------------------------------------------------------
 
@@ -222,6 +252,9 @@ function wrapSvg(innerContent: string): string {
 export function renderSegmentPatternThumbnail(
   preset: UserSegmentPatternPreset,
 ): TemplateResult | null {
+  const image = renderImageThumbnail(preset);
+  if (image) return image;
+
   if (!preset.segments || preset.segments.length === 0) return null;
 
   const slices = mergeSegments(preset.segments);
@@ -239,6 +272,9 @@ export function renderSegmentPatternThumbnail(
 export function renderEffectThumbnail(
   preset: UserEffectPreset,
 ): TemplateResult | null {
+  const image = renderImageThumbnail(preset);
+  if (image) return image;
+
   const colors = (preset.effect_colors ?? []).slice(0, 8);
   if (colors.length === 0) return null;
 
@@ -264,6 +300,9 @@ export function renderEffectThumbnail(
 export function renderSegmentSequenceThumbnail(
   preset: UserSegmentSequencePreset,
 ): TemplateResult | null {
+  const image = renderImageThumbnail(preset);
+  if (image) return image;
+
   if (!preset.steps || preset.steps.length === 0) return null;
 
   const step = preset.steps[0]!;
@@ -531,13 +570,9 @@ export function renderDynamicSceneThumbnail(
 ): TemplateResult | null {
   // If the preset has an image thumbnail, render it as an <img> instead of SVG.
   // Audio-reactive badge is handled via DOM overlay in the panel for all types.
-  if (!Array.isArray(colorsOrPreset) && (colorsOrPreset as UserDynamicScenePreset).thumbnail) {
-    const thumbId = (colorsOrPreset as UserDynamicScenePreset).thumbnail;
-    return html`<img
-      src="/api/aqara_advanced_lighting/thumbnails/${thumbId}"
-      alt="Preset thumbnail"
-      style="object-fit:cover"
-    />`;
+  if (!Array.isArray(colorsOrPreset)) {
+    const image = renderImageThumbnail(colorsOrPreset);
+    if (image) return image;
   }
 
   let colors: DynamicSceneColor[];

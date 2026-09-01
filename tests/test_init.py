@@ -8,11 +8,18 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 
+from custom_components.aqara_advanced_lighting import (
+    async_remove_config_entry_device,
+)
 from custom_components.aqara_advanced_lighting.const import (
     BACKEND_ZHA,
     CONF_BACKEND_TYPE,
     CONF_Z2M_BASE_TOPIC,
     DOMAIN,
+)
+from custom_components.aqara_advanced_lighting.models import (
+    AqaraDevice,
+    AqaraLightingRuntimeData,
 )
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -473,3 +480,139 @@ async def test_zha_repair_issue_clears_on_successful_setup(
 
     assert issue_reg.async_get_issue(DOMAIN, "zha_not_installed") is None, \
         "repair issue should be cleared after successful ZHA setup"
+
+
+async def test_remove_config_entry_device_allows_stale_device(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A device the backend no longer reports can be deleted from the UI.
+
+    On HA 2026.8+ our device is owned solely by our config entry, so no other
+    integration offers a removal path for it. Without this hook the device
+    card has no delete action and a device that Z2M/ZHA has dropped while we
+    were not running can never be cleared by hand.
+    """
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.runtime_data = AqaraLightingRuntimeData(
+        config_entry=mock_config_entry
+    )
+
+    device_reg = dr.async_get(hass)
+    device = device_reg.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={(DOMAIN, "0x00158d0001abcdef")},
+        name="bedroom_light",
+    )
+
+    assert (
+        await async_remove_config_entry_device(hass, mock_config_entry, device)
+        is True
+    ), "a device the backend no longer reports must be removable"
+
+
+async def test_remove_config_entry_device_rejects_live_device(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A device the backend still reports must not be removable.
+
+    Removing it would be futile: the next bridge/devices message or reload
+    re-creates it, so accepting the delete would silently do nothing.
+    """
+    ieee = "0x00158d0001abcdef"
+    mock_config_entry.add_to_hass(hass)
+    runtime_data = AqaraLightingRuntimeData(config_entry=mock_config_entry)
+    runtime_data.aqara_devices[ieee] = AqaraDevice(
+        identifier=ieee,
+        name="bedroom_light",
+        model_id="lumi.light.acn031",
+        manufacturer="Aqara",
+    )
+    mock_config_entry.runtime_data = runtime_data
+
+    device_reg = dr.async_get(hass)
+    device = device_reg.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={(DOMAIN, ieee)},
+        name="bedroom_light",
+    )
+
+    assert (
+        await async_remove_config_entry_device(hass, mock_config_entry, device)
+        is False
+    ), "a device the backend still reports must be rejected"
+
+
+async def test_remove_config_entry_device_allows_device_without_our_identifier(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A device carrying no identifier of ours is not one we provide."""
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.runtime_data = AqaraLightingRuntimeData(
+        config_entry=mock_config_entry
+    )
+
+    device_reg = dr.async_get(hass)
+    device = device_reg.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={("mqtt", "zigbee2mqtt_0x00158d0001abcdef")},
+        name="orphan",
+    )
+
+    assert (
+        await async_remove_config_entry_device(hass, mock_config_entry, device)
+        is True
+    ), "a device with no identifier of ours must be removable"
+
+
+async def test_remove_config_entry_device_allows_when_entry_not_loaded(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """With no runtime data there is no backend to contradict the removal.
+
+    The delete action is offered for a config entry that failed to set up or
+    is disabled, where `runtime_data` was never assigned. Reading it directly
+    would raise AttributeError and surface as a generic failure.
+    """
+    mock_config_entry.add_to_hass(hass)
+
+    device_reg = dr.async_get(hass)
+    device = device_reg.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={(DOMAIN, "0x00158d0001abcdef")},
+        name="bedroom_light",
+    )
+
+    assert (
+        await async_remove_config_entry_device(hass, mock_config_entry, device)
+        is True
+    ), "an unloaded entry must not block removal"
+
+
+async def test_setup_entry_offers_device_removal(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_mqtt_client: MagicMock,
+    mock_state_manager: MagicMock,
+    mock_cct_sequence_manager: MagicMock,
+    mock_segment_sequence_manager: MagicMock,
+    mock_mqtt_wait: AsyncMock,
+) -> None:
+    """The device page must offer a delete action for our devices.
+
+    HA derives this from async_remove_config_entry_device living on the
+    integration's top-level module, so moving the hook elsewhere would
+    silently take the delete action away again.
+    """
+    mock_config_entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.supports_remove_device is True, (
+        "async_remove_config_entry_device must be exposed on the integration "
+        "module so the device page offers a delete action"
+    )

@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, issue_registry as ir
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.util.dt import utcnow
 
 from custom_components.aqara_advanced_lighting.const import (
@@ -90,12 +94,12 @@ def mock_mqtt_wait():
 
 
 def _make_bridge_devices_payload(
-    *ieee_addresses: str, software_build_id: str | None = None
+    *ieee_addresses: str, software_build_id: object | None = None
 ) -> str:
     """Build a bridge/devices JSON payload for the given IEEE addresses."""
     devices = []
     for i, ieee in enumerate(ieee_addresses):
-        device: dict[str, str] = {
+        device: dict[str, object] = {
             "ieee_address": ieee,
             "friendly_name": f"device_{i}",
             "model_id": MODEL_T2,
@@ -669,3 +673,468 @@ async def test_firmware_version_absent_from_payload_clears_inherited(
         "an absent software_build_id must clear the inherited value, not "
         "leave another integration's firmware string in place"
     )
+
+
+async def test_legacy_merge_uses_new_identifiers_not_merge_identifiers(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """The pre-2026.8 merge path must not use the deprecated merge_identifiers.
+
+    merge_identifiers is deprecated and removed in HA Core 2027.9; the
+    replacement is to compute the complete set and pass new_identifiers.
+    new_identifiers has been available far longer than our minimum core, so
+    the legacy branch can use it without a version probe.
+
+    Asserts on the registry calls rather than resulting state, for the reason
+    given in test_single_config_entry_registry_keeps_our_identifier: this
+    branch models a core whose identifier uniqueness rules cannot be
+    simulated by patching the flag.
+    """
+    mqtt_config_entry = MockConfigEntry(
+        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
+    )
+    mqtt_config_entry.add_to_hass(hass)
+
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    mqtt_identifier = ("mqtt", f"zigbee2mqtt_{IEEE_A}")
+    dr_instance.async_get_or_create(
+        config_entry_id=mqtt_config_entry.entry_id,
+        identifiers={mqtt_identifier},
+        name="MQTT Light",
+    )
+
+    registry_cls = type(dr_instance)
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        False,
+    ), patch.object(
+        registry_cls, "async_update_device", autospec=True,
+        side_effect=registry_cls.async_update_device,
+    ) as spy_update:
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    assert not [
+        call for call in spy_update.call_args_list
+        if "merge_identifiers" in call.kwargs
+    ], "merge_identifiers is deprecated; pass the complete new_identifiers set"
+
+    merges = [
+        call for call in spy_update.call_args_list
+        if "new_identifiers" in call.kwargs
+    ]
+    assert merges, "the legacy path must still add our identifier to the device"
+
+    new_identifiers = merges[-1].kwargs["new_identifiers"]
+    assert (DOMAIN, IEEE_A) in new_identifiers, (
+        "our identifier must be added or device triggers cannot resolve"
+    )
+    assert mqtt_identifier in new_identifiers, (
+        "new_identifiers replaces the whole set, so the identifiers already "
+        "on the MQTT device must be carried over rather than dropped"
+    )
+
+
+async def test_device_links_to_mqtt_device_via_device_id(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Our device declares the MQTT light as its via device.
+
+    Since 2026.8 our device is a separate card from the light's. Pointing
+    via_device_id at the MQTT device gives it a "Connected via" link back to
+    the light, which reads better than two unrelated sibling cards.
+    """
+    mqtt_config_entry = MockConfigEntry(
+        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
+    )
+    mqtt_config_entry.add_to_hass(hass)
+
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    mqtt_identifier = ("mqtt", f"zigbee2mqtt_{IEEE_A}")
+    mqtt_device = dr_instance.async_get_or_create(
+        config_entry_id=mqtt_config_entry.entry_id,
+        identifiers={mqtt_identifier},
+        name="MQTT Light",
+    )
+
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        True,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    our_device = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert our_device is not None, "we must register our own device"
+    assert our_device.via_device_id == mqtt_device.id, (
+        "our device must point at the MQTT light as its via device"
+    )
+
+
+async def test_device_registers_when_mqtt_device_not_yet_known(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Registration must survive the MQTT device not existing yet.
+
+    Z2M's retained bridge/devices message can arrive before MQTT discovery
+    has created the light's device. async_get_or_create raises DeviceInfoError
+    for a via_device_id that is not a registered device, so the link has to be
+    skipped rather than guessed.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        True,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    dr_instance = dr.async_get(hass)
+    our_device = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert our_device is not None, (
+        "a missing MQTT device must not stop us registering ours"
+    )
+    assert our_device.via_device_id is None, "there is no via device to link to"
+
+
+def _get_backend(hass: HomeAssistant, entry: MockConfigEntry):
+    """Return the live MQTTBackend instance for a config entry."""
+    return hass.data[DOMAIN]["entries"][entry.entry_id]["backend"]
+
+
+def _register_z2m_light(hass: HomeAssistant, ieee: str) -> str:
+    """Register a light entity carrying the IEEE address in its unique id.
+
+    Mirrors what the MQTT integration creates for a Z2M light, which our
+    mapping matches on with its unique_id strategy.
+    """
+    ent_reg = er.async_get(hass)
+    entry = ent_reg.async_get_or_create(
+        domain="light",
+        platform="mqtt",
+        unique_id=f"{ieee}_light_zigbee2mqtt",
+    )
+    return entry.entity_id
+
+
+async def test_entity_mapping_not_ready_without_light_entities(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Mapping nothing must not report the integration as ready.
+
+    Z2M's retained bridge/devices message can arrive before the MQTT
+    integration has registered the lights. Reporting ready then makes the
+    panel show setup as complete while no light is usable and nothing says
+    why. The ZHA backend already reports not-ready in this situation.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    with patch.object(
+        type(_get_backend(hass, entry)),
+        "_async_retry_entity_mapping",
+        new_callable=AsyncMock,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    assert entry.runtime_data.entity_mapping_ready is False, (
+        "a device list with no matching light entities is not a ready mapping"
+    )
+
+
+async def test_entity_mapping_ready_when_no_devices_discovered(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """An empty Z2M device list is a complete mapping, not a pending one.
+
+    There is nothing to wait for, so the panel must not sit on a loading
+    state for a user who has no supported bulbs.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload())
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.entity_mapping_ready is True, (
+        "no devices means there is nothing left to map"
+    )
+
+
+async def test_entity_mapping_retry_maps_entities_that_appear_late(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """The retry picks up light entities registered after the device list.
+
+    Z2M only republishes bridge/devices on a join or leave, so without a
+    retry the mapping would stay empty until then or until a restart.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+    backend = _get_backend(hass, entry)
+
+    with patch.object(
+        type(backend), "_async_retry_entity_mapping", new_callable=AsyncMock,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    assert entry.runtime_data.entity_mapping_ready is False
+
+    # MQTT discovery registers the light only now
+    entity_id = _register_z2m_light(hass, IEEE_A)
+
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_MAPPING_RETRY_INTERVAL",
+        0,
+    ):
+        await backend._async_retry_entity_mapping()
+
+    assert entry.runtime_data.entity_mapping_ready is True, (
+        "the retry must mark the mapping ready once entities exist"
+    )
+    assert entity_id in entry.runtime_data.entity_to_z2m_map, (
+        "the late entity must actually be mapped, not just declared ready"
+    )
+
+
+async def test_entity_mapping_retry_gives_up_and_reports_ready(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """Exhausting the retries must still release the panel's loading state.
+
+    Staying not-ready forever would leave the panel loading with no way out.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+    backend = _get_backend(hass, entry)
+
+    with patch.object(
+        type(backend), "_async_retry_entity_mapping", new_callable=AsyncMock,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    # No light entity is ever registered
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_MAPPING_RETRY_INTERVAL",
+        0,
+    ), patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_MAPPING_RETRY_ATTEMPTS",
+        2,
+    ):
+        await backend._async_retry_entity_mapping()
+
+    assert entry.runtime_data.entity_mapping_ready is True, (
+        "giving up must release the loading state rather than hang the panel"
+    )
+    assert not entry.runtime_data.entity_to_z2m_map, (
+        "nothing was mappable, so nothing must be claimed as mapped"
+    )
+
+
+async def test_via_device_link_backfilled_when_mqtt_device_appears_late(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """The retry links our device once MQTT registers the light's device.
+
+    The via link is set when we register a device, which can happen before
+    MQTT discovery. Z2M only republishes bridge/devices on a join or leave,
+    so the link needs backfilling rather than waiting for a restart.
+    """
+    mqtt_config_entry = MockConfigEntry(
+        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
+    )
+    mqtt_config_entry.add_to_hass(hass)
+
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+    backend = _get_backend(hass, entry)
+
+    with patch.object(
+        type(backend), "_async_retry_entity_mapping", new_callable=AsyncMock,
+    ), patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        True,
+    ):
+        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+        await hass.async_block_till_done()
+
+    dr_instance = dr.async_get(hass)
+    our_device = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert our_device.via_device_id is None, "nothing to link to yet"
+
+    # MQTT discovery registers the light's device only now
+    mqtt_device = dr_instance.async_get_or_create(
+        config_entry_id=mqtt_config_entry.entry_id,
+        identifiers={("mqtt", f"zigbee2mqtt_{IEEE_A}")},
+        name="MQTT Light",
+    )
+    _register_z2m_light(hass, IEEE_A)
+
+    with patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_MAPPING_RETRY_INTERVAL",
+        0,
+    ), patch(
+        "custom_components.aqara_advanced_lighting.mqtt_backend."
+        "_SINGLE_CONFIG_ENTRY_REGISTRY",
+        True,
+    ):
+        await backend._async_retry_entity_mapping()
+
+    relinked = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert relinked.via_device_id == mqtt_device.id, (
+        "the retry must backfill the via link once the MQTT device exists"
+    )
+
+
+async def test_non_string_software_build_id_is_coerced(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """A numeric software_build_id must reach the registry as a string.
+
+    software_build_id comes straight out of Z2M's JSON, so its type is
+    whatever the bulb reported. Home Assistant deprecates non-string values
+    for device registry fields and stops coercing them in 2026.12, so the
+    conversion has to happen here.
+    """
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    registry_cls = type(dr_instance)
+    with patch.object(
+        registry_cls, "async_get_or_create", autospec=True,
+        side_effect=registry_cls.async_get_or_create,
+    ) as spy_create:
+        _fire_bridge_devices(
+            subscribe_calls,
+            _make_bridge_devices_payload(IEEE_A, software_build_id=20260817),
+        )
+        await hass.async_block_till_done()
+
+    # Asserts what we hand the registry, not what it does with it. Home
+    # Assistant still coerces non-strings today, so checking the stored
+    # value would pass either way; it is the deprecated call that matters.
+    our_creates = [
+        call for call in spy_create.call_args_list
+        if call.kwargs.get("config_entry_id") == entry.entry_id
+    ]
+    assert our_creates, "we must register a device under our own config entry"
+    sw_version = our_creates[-1].kwargs["sw_version"]
+    assert isinstance(sw_version, str), (
+        f"sw_version must reach the registry as a string, got {type(sw_version).__name__}"
+    )
+    assert sw_version == "20260817", "a numeric build id must be converted, not dropped"
+
+
+async def test_absent_software_build_id_stays_none(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+) -> None:
+    """A bulb that reports no build id must not gain the string "None"."""
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+    await hass.async_block_till_done()
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert device is not None
+    assert device.sw_version is None, "absent firmware must stay absent"

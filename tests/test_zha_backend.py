@@ -1,5 +1,7 @@
 """Tests for ZHABackend stale device removal."""
 
+import asyncio
+import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -308,3 +310,123 @@ async def test_non_stale_zha_devices_unchanged(
     assert IEEE_A in mock_config_entry_zha.runtime_data.aqara_devices, (
         "device_a should be in runtime_data.aqara_devices"
     )
+
+
+async def test_device_links_to_zha_device_via_device_id(
+    hass: HomeAssistant,
+    mock_config_entry_zha: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+) -> None:
+    """Our device declares the ZHA device as its via device.
+
+    Since 2026.8 our device is a separate card from the light's. Pointing
+    via_device_id at the ZHA device gives it a "Connected via" link back to
+    the light.
+    """
+    zha_config_entry = MockConfigEntry(
+        domain="zha", title="ZHA", data={}, unique_id="zha_main",
+    )
+    zha_config_entry.add_to_hass(hass)
+    mock_config_entry_zha.add_to_hass(hass)
+
+    device_reg = dr.async_get(hass)
+    zha_device = device_reg.async_get_or_create(
+        config_entry_id=zha_config_entry.entry_id,
+        identifiers={("zha", IEEE_A)},
+        name="ZHA Light",
+    )
+
+    gateway = _make_gateway(IEEE_A)
+    with patch(
+        "homeassistant.components.zha.helpers.get_zha_gateway",
+        return_value=gateway,
+    ):
+        assert await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
+        await hass.async_block_till_done()
+
+    our_device = device_reg.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), mock_config_entry_zha.entry_id
+    )
+    assert our_device is not None, "we must register our own device"
+    assert our_device.via_device_id == zha_device.id, (
+        "our device must point at the ZHA device as its via device"
+    )
+
+
+async def test_device_registers_when_zha_device_not_yet_known(
+    hass: HomeAssistant,
+    mock_config_entry_zha: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+) -> None:
+    """Registration must survive ZHA's own device not being registered yet.
+
+    async_get_or_create raises DeviceInfoError for a via_device_id that is not
+    a registered device, so the link has to be skipped rather than guessed.
+    """
+    mock_config_entry_zha.add_to_hass(hass)
+
+    gateway = _make_gateway(IEEE_A)
+    with patch(
+        "homeassistant.components.zha.helpers.get_zha_gateway",
+        return_value=gateway,
+    ):
+        assert await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
+        await hass.async_block_till_done()
+
+    device_reg = dr.async_get(hass)
+    our_device = device_reg.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), mock_config_entry_zha.entry_id
+    )
+    assert our_device is not None, (
+        "a missing ZHA device must not stop us registering ours"
+    )
+    assert our_device.via_device_id is None, "there is no via device to link to"
+
+
+def _get_zha_backend(hass: HomeAssistant, entry: MockConfigEntry):
+    """Return the live ZHABackend instance for a config entry."""
+    return hass.data[DOMAIN]["entries"][entry.entry_id]["backend"]
+
+
+async def test_entity_mapping_retry_cancelled_on_shutdown(
+    hass: HomeAssistant,
+    mock_config_entry_zha: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+) -> None:
+    """A pending mapping retry must not outlive the config entry.
+
+    The retry runs for up to 30 seconds and writes entity_mapping_ready on
+    runtime_data. Left running across a reload it would keep writing to the
+    unloaded entry's data, and it also held up anything waiting on Home
+    Assistant's pending tasks for the whole 30 seconds.
+    """
+    # A device with no matching light entity leaves the mapping not ready,
+    # which is what schedules the retry.
+    gateway = _make_gateway(IEEE_A)
+    entry = await _setup_entry_with_real_zha_backend(
+        hass, mock_config_entry_zha, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, gateway,
+    )
+    backend = _get_zha_backend(hass, entry)
+
+    task = backend._mapping_retry_task
+    assert task is not None, "an empty mapping must schedule a retry"
+    assert not task.done(), "the retry should still be pending"
+
+    await backend.async_shutdown()
+
+    assert backend._mapping_retry_task is None, (
+        "shutdown must drop the retry so it cannot outlive the entry"
+    )
+
+    # cancel() only requests cancellation; await the task to let the loop
+    # deliver it before asserting on the outcome.
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert task.cancelled(), "the pending retry must be cancelled"
