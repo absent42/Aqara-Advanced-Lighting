@@ -56,14 +56,6 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# HA 2026.8 restricts a device registry entry to a single config entry and
-# makes identifiers unique per config entry, so identifier lookups must name
-# the owning entry. Probe for the API introduced by that change.
-# See the legacy migration removal tracker.
-_SINGLE_CONFIG_ENTRY_REGISTRY = hasattr(
-    dr.DeviceRegistry, "async_get_device_by_identifier"
-)
-
 # Aqara manufacturer-specific Zigbee cluster ID
 CLUSTER_MANU_SPECIFIC_LUMI = 0xFCC0
 
@@ -337,15 +329,11 @@ class ZHABackend:
         light's. Naming the ZHA device as our via device gives our card a
         "Connected via" link back to the light.
 
-        None before 2026.8, where we merge into ZHA's device instead and a via
-        link would point at ourselves. Also None when ZHA's own device is not
-        registered yet: async_get_or_create raises DeviceInfoError for a
-        via_device_id that is not a registered device, so the link cannot be
-        guessed. Passing None also clears a link whose device has gone.
+        None when ZHA's own device is not registered yet: async_get_or_create
+        raises DeviceInfoError for a via_device_id that is not a registered
+        device, so the link cannot be guessed. Passing None also clears a link
+        whose device has gone.
         """
-        if not _SINGLE_CONFIG_ENTRY_REGISTRY:
-            return None
-
         zha_entry_id = self._zha_config_entry_id()
         if zha_entry_id is None:
             return None
@@ -362,18 +350,8 @@ class ZHABackend:
             for identifier_domain, identifier_value in device.identifiers:
                 if identifier_domain == DOMAIN:
                     if identifier_value not in seen_ieee:
-                        if _SINGLE_CONFIG_ENTRY_REGISTRY:
-                            # HA 2026.8+: the device is ours alone, so drop it.
-                            device_reg.async_remove_device(device.id)
-                        elif len(device.config_entries) > 1:
-                            # Pre-2026.8: shared with ZHA, release only our
-                            # claim so ZHA's device survives.
-                            device_reg.async_update_device(
-                                device.id,
-                                remove_config_entry_id=self.entry.entry_id,
-                            )
-                        else:
-                            device_reg.async_remove_device(device.id)
+                        # The device is ours alone, so drop it.
+                        device_reg.async_remove_device(device.id)
                         self.entry.runtime_data.aqara_devices.pop(identifier_value, None)
                     break
 
@@ -388,17 +366,14 @@ class ZHABackend:
         zha_entry_id = self._zha_config_entry_id()
 
         for ieee_str, aqara_device in self.entry.runtime_data.aqara_devices.items():
-            # ZHA registers devices with ("zha", ieee_str) identifiers
-            if _SINGLE_CONFIG_ENTRY_REGISTRY and zha_entry_id is not None:
-                # Identifiers are unique per config entry, so the lookup must
-                # name ZHA's entry rather than searching globally.
-                ha_device = dev_reg.async_get_device_by_identifier(
-                    ("zha", ieee_str), zha_entry_id
-                )
-            else:
-                ha_device = dev_reg.async_get_device(
-                    identifiers={("zha", ieee_str)}
-                )
+            # ZHA registers devices with ("zha", ieee_str) identifiers.
+            # Identifiers are unique per config entry, so the lookup must
+            # name ZHA's entry rather than searching globally.
+            ha_device = (
+                dev_reg.async_get_device_by_identifier(("zha", ieee_str), zha_entry_id)
+                if zha_entry_id is not None
+                else None
+            )
             if not ha_device:
                 _LOGGER.debug(
                     "No HA device found for ZHA device %s (%s)",

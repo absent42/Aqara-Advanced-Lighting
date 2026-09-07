@@ -6,7 +6,6 @@ This replaces direct zigpy internal manipulation with properly typed
 cluster definitions that ZHA understands natively.
 """
 
-import dataclasses
 import logging
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,17 +53,10 @@ def register_quirks() -> None:
     if _quirks_registered:
         return
 
-    # zha-quirks 2.2 (shipped with HA 2026.8) moved CustomCluster and
-    # QuirkBuilder out of zigpy.quirks.v2; the old paths still work but emit
-    # DeprecationWarnings. Prefer the new locations, fall back for older cores.
-    # See the legacy migration removal tracker.
     try:
-        try:
-            from zhaquirks.builder import QuirkBuilder
-            from zhaquirks.clusters import CustomCluster
-        except ImportError:
-            from zigpy.quirks.v2 import CustomCluster, QuirkBuilder
         import zigpy.types as t
+        from zhaquirks.builder import QuirkBuilder
+        from zhaquirks.clusters import CustomCluster
         from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
     except ImportError:
         _LOGGER.warning(
@@ -77,21 +69,13 @@ def register_quirks() -> None:
 
     # --- Custom cluster definition ---
 
-    # zigpy 2.1 (HA 2026.8) deprecates manufacturer-specific attributes without
-    # an explicit manufacturer_code; older zigpy has no such field. Probe for
-    # it. See the legacy migration removal tracker.
-    _attribute_def_has_manufacturer_code = "manufacturer_code" in {
-        field.name for field in dataclasses.fields(ZCLAttributeDef)
-    }
-
     def _aqara_attribute(attr_id: int, attr_type: type) -> ZCLAttributeDef:
-        """Manufacturer-specific attribute carrying the Aqara code explicitly."""
-        if _attribute_def_has_manufacturer_code:
-            return ZCLAttributeDef(
-                id=attr_id, type=attr_type, manufacturer_code=AQARA_MANUFACTURER_CODE
-            )
+        """Manufacturer-specific attribute carrying the Aqara code explicitly.
+
+        zigpy 2.1 deprecates manufacturer-specific attributes without one.
+        """
         return ZCLAttributeDef(
-            id=attr_id, type=attr_type, is_manufacturer_specific=True
+            id=attr_id, type=attr_type, manufacturer_code=AQARA_MANUFACTURER_CODE
         )
 
     class AqaraLumiCluster(CustomCluster):

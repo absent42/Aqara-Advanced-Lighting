@@ -30,7 +30,7 @@ tests/
 ├── test_capability_profile.py             # Light capability detection and color temp conversion
 ├── test_circadian_manager.py              # Circadian overlay manager
 ├── test_config_flow.py                    # Config flow setup and reconfiguration
-├── test_device_merging.py                 # HA device registry merging with Z2M/ZHA
+├── test_device_merging.py                 # Our device beside the Z2M device in the registry
 ├── test_device_trigger.py                 # Device automation triggers
 ├── test_entity_controller.py              # Entity override detection, drift, pause/resume
 ├── test_init.py                           # Integration setup, unload, device migration, and ZHA repair issues
@@ -46,7 +46,7 @@ tests/
 └── README.md                              # This file
 ```
 
-The Python suite contains roughly 768 tests across 40 files. The frontend has its own Vitest suite (96 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
+The Python suite contains roughly 764 tests across 40 files. The frontend has its own Vitest suite (96 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
 
 ## Running tests
 
@@ -264,14 +264,14 @@ Config flow setup and reconfiguration.
 - Single and multiple instance enforcement
 - Reconfigure flow: update topic, preserve defaults, MQTT validation, empty topic fallback, duplicate topic prevention
 
-### test_init.py (14 tests)
+### test_init.py (13 tests)
 
 Integration initialization, setup, unload, device migration, and ZHA repair issues.
 
 - Successful setup with MQTT, backend, state manager, and sequence managers
 - Setup failure when MQTT unavailable (with retry)
 - Config entry unload and reload
-- v1.3 device migration: removes sole-config-entry devices, removes partial-merge devices, preserves truly merged devices, full clean re-merge
+- v1.3 device migration: removes sole-config-entry devices, removes partial-merge devices, full clean re-merge
 - ZHA repair issue created on `ImportError` (ZHA not installed), cleared on successful setup
 - ValueError (ZHA gateway not ready) raises `ConfigEntryNotReady` without creating a repair issue
 - ZHA backend: a device ZHA resolved with the built-in quirk triggers one ZHA reload and a retry, and the log names the device
@@ -396,10 +396,10 @@ Entity override detection, drift tracking, and external change handling.
 
 ### test_device_merging.py (2 tests)
 
-Home Assistant device registry merging for Aqara lights with Z2M/ZHA.
+Since Home Assistant 2026.8 our device sits beside the Zigbee2MQTT device rather than merging into it. These tests pin the registry behaviour the MQTT backend relies on.
 
-- Z2M and AAL devices merge via shared MAC connection
-- Devices merge regardless of registration order
+- Registering after Z2M creates our own device carrying both identifiers and leaves Z2M's untouched
+- Registering before Z2M is not absorbed when Z2M registers later
 
 ### test_device_trigger.py (22 tests)
 
@@ -412,19 +412,18 @@ Device automation triggers for sequences and effects.
 - **Trigger event map** (5): completeness, CCT/segment sequence type filters, effect no-filter, 22 total trigger types
 - **Merged devices** (2): triggers and entity resolution work on merged devices
 
-### test_mqtt_backend.py (7 tests)
+### test_mqtt_backend.py (6 tests)
 
 `MQTTBackend` stale device removal and Z2M bridge repair timer.
 
-- **Stale device removal** (3): stale device removed from registry and runtime data when missing from bridge/devices message; merged device releases only this integration's claim; devices present in both messages are unchanged
+- **Stale device removal** (2): stale device removed from registry and runtime data when missing from bridge/devices message; devices present in both messages are unchanged
 - **Repair timer** (4): repair issue created after 120s with no bridge response; no issue created when bridge responds before timer fires; issue clears when bridge finally responds; timer cancelled on integration unload
 
-### test_zha_backend.py (3 tests)
+### test_zha_backend.py (2 tests)
 
 `ZHABackend` stale device removal at startup.
 
 - Stale device fully removed from registry and runtime data when absent from ZHA scan
-- Merged device releases only this integration's claim when absent from ZHA scan
 - Device present in ZHA scan remains registered and in runtime data
 
 ## Test requirements

@@ -272,63 +272,6 @@ async def test_setup_does_not_prune_devices_we_own(
     )
 
 
-async def test_migrate_preserves_truly_merged_devices(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_mqtt_client: MagicMock,
-    mock_state_manager: MagicMock,
-    mock_cct_sequence_manager: MagicMock,
-    mock_segment_sequence_manager: MagicMock,
-    mock_mqtt_wait: AsyncMock,
-) -> None:
-    """Test that truly merged devices (multiple config entries) are preserved.
-
-    A device shared between our integration and MQTT/ZHA has multiple config
-    entries. The migration must not remove these.
-    """
-    mock_config_entry.add_to_hass(hass)
-
-    # Create a second config entry to simulate the MQTT integration
-    mqtt_config_entry = MockConfigEntry(
-        domain="mqtt",
-        title="MQTT",
-        data={},
-        unique_id="mqtt",
-    )
-    mqtt_config_entry.add_to_hass(hass)
-
-    device_reg = dr.async_get(hass)
-
-    # Create device with MQTT config entry first
-    merged_device = device_reg.async_get_or_create(
-        config_entry_id=mqtt_config_entry.entry_id,
-        identifiers={("mqtt", "zigbee2mqtt_0x00158d0001abcdef")},
-        name="bedroom_light",
-        manufacturer="Aqara",
-        model="E27 CCT led bulb",
-    )
-    # Add our config entry to the same device
-    device_reg.async_get_or_create(
-        config_entry_id=mock_config_entry.entry_id,
-        identifiers={("mqtt", "zigbee2mqtt_0x00158d0001abcdef")},
-    )
-    device_reg.async_update_device(
-        merged_device.id,
-        merge_identifiers={(DOMAIN, "0x00158d0001abcdef")},
-    )
-    merged_device_id = merged_device.id
-
-    # Verify it has both config entries
-    updated = device_reg.async_get(merged_device_id)
-    assert len(updated.config_entries) == 2
-
-    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
-
-    # Truly merged device should still exist
-    assert device_reg.async_get(merged_device_id) is not None
-
-
 async def test_v1_3_migration_removes_all_devices(
     hass: HomeAssistant,
     mock_config_entry_v1_2: MockConfigEntry,

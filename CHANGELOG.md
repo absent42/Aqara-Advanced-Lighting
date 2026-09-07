@@ -4,6 +4,10 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 
 ## [1.3.4] - unreleased
 
+### Breaking Changes
+
+  - Home Assistant 2026.8 or newer is now required, up from 2026.6. The code that merged this integration's config entry into the Zigbee2MQTT or ZHA device on older cores has been removed, along with the fallbacks for the older zigpy and zha-quirks import paths and attribute definitions. On 2026.8 and later nothing changes: since that release the integration has registered its own device beside the Zigbee2MQTT or ZHA one.
+
 ### Fixed
 
   - Effects, segment patterns and segment sequences failed on the ZHA backend, logging a `KeyError` for every attribute write, whenever ZHA started after this integration: on a first installation where ZHA was added afterwards, or when ZHA's start was delayed and retried. ZHA in Home Assistant 2026.8 and later applies the most recently registered quirk for a model, and zha-quirks now ships its own quirks for the T1M and T1 Strip whose cluster does not define the Aqara effect and segment attributes, so whichever registered last decided whether effects could be written. The integration now loads the built-in zha-quirks before registering its own, so its quirk is applied regardless of the order in which ZHA and this integration start.
@@ -11,7 +15,8 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 
 ### Internal
 
-  - The Aqara cluster attributes now declare the Aqara manufacturer code explicitly. zigpy 2.1 deprecates manufacturer-specific attributes without one and logged a warning on every lookup. A zigpy without the field falls back to the previous definitions.
+  - The Aqara cluster attributes now declare the Aqara manufacturer code explicitly. zigpy 2.1 deprecates manufacturer-specific attributes without one and logged a warning on every lookup.
+  - The test suite no longer carries expected failures. The five tests that asserted the pre-2026.8 shared-device model were rewritten or deleted, and assertions that used `device_registry.async_get_device`, which Home Assistant deprecates for 2027.8, now look devices up per config entry.
 
 ## [1.3.3] - 2026/09/01
 

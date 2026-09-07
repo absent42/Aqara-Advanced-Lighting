@@ -205,76 +205,6 @@ async def test_stale_zha_device_removed_when_missing_from_scan(
     )
 
 
-async def test_stale_zha_merged_device_releases_claim_only(
-    hass: HomeAssistant,
-    mock_config_entry_zha: MockConfigEntry,
-    mock_state_manager,
-    mock_cct_sequence_manager,
-    mock_segment_sequence_manager,
-) -> None:
-    """Stale merged device has our entry_id removed but the device itself survives.
-
-    When device_a is shared between our config entry and a second config entry
-    (e.g. ZHA integration), stale removal must call
-    async_update_device(remove_config_entry_id=...) rather than
-    async_remove_device, so the other integration's device is not destroyed.
-    """
-    # A second config entry simulating the ZHA integration owning the device.
-    zha_config_entry = MockConfigEntry(
-        domain="zha",
-        title="ZHA",
-        data={},
-        unique_id="zha_main",
-    )
-    zha_config_entry.add_to_hass(hass)
-
-    mock_config_entry_zha.add_to_hass(hass)
-
-    device_reg = dr.async_get(hass)
-
-    # Create device_a with BOTH config entries (merged device).
-    device_a = device_reg.async_get_or_create(
-        config_entry_id=zha_config_entry.entry_id,
-        identifiers={("zha", IEEE_A)},
-        name="device_a",
-        manufacturer="Aqara",
-        model="T2 Bulb",
-    )
-    # Add our config entry and our identifier to the same device.
-    device_reg.async_update_device(
-        device_a.id,
-        add_config_entry_id=mock_config_entry_zha.entry_id,
-        merge_identifiers={(DOMAIN, IEEE_A)},
-    )
-    merged = device_reg.async_get(device_a.id)
-    assert len(merged.config_entries) == 2, (
-        "device_a should have two config entries before setup"
-    )
-    device_a_id = device_a.id
-
-    # ZHA gateway returns no devices — device_a is stale from our perspective.
-    gateway = _make_gateway()  # empty
-
-    with patch(
-        "homeassistant.components.zha.helpers.get_zha_gateway",
-        return_value=gateway,
-    ):
-        assert await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
-        await hass.async_block_till_done()
-
-    # Device should still exist because ZHA still owns it.
-    surviving = device_reg.async_get(device_a_id)
-    assert surviving is not None, (
-        "merged device_a should still exist after stale removal "
-        "(ZHA config entry still owns it)"
-    )
-
-    # But OUR config entry should have been released.
-    assert mock_config_entry_zha.entry_id not in surviving.config_entries, (
-        "our config entry should be removed from the merged device"
-    )
-
-
 async def test_non_stale_zha_devices_unchanged(
     hass: HomeAssistant,
     mock_config_entry_zha: MockConfigEntry,
@@ -315,7 +245,7 @@ async def test_non_stale_zha_devices_unchanged(
     assert still_there is not None, (
         "device_a should remain registered when present in ZHA gateway"
     )
-    assert mock_config_entry_zha.entry_id in still_there.config_entries, (
+    assert still_there.primary_config_entry == mock_config_entry_zha.entry_id, (
         "our config entry should still be on device_a"
     )
 
