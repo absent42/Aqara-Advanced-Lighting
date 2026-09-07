@@ -19,6 +19,26 @@ CLUSTER_MANU_SPECIFIC_LUMI = 0xFCC0
 # Track registration state to avoid duplicate registration
 _quirks_registered = False
 
+def _preload_builtin_quirks() -> None:
+    """Register the zha-quirks built-in quirks before ours.
+
+    ZHA applies the most recently registered quirk for a model. zha-quirks
+    ships quirks for the T1M and T1 Strip that lack the effect and segment
+    attributes, registered when the ZHA gateway starts, normally after our
+    async_setup. Importing them first keeps our quirks ahead. The import is
+    process-wide and cached, so ZHA's own later call finds nothing new.
+    """
+    try:
+        import zhaquirks
+
+        zhaquirks.setup()
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning(
+            "Could not preload zha-quirks (%s); its built-in Aqara quirks may "
+            "take precedence over this integration's",
+            err,
+        )
+
 def register_quirks() -> None:
     """Register Aqara lighting device quirks with zigpy.
 
@@ -46,6 +66,8 @@ def register_quirks() -> None:
             "Ensure ZHA integration is installed"
         )
         return
+
+    _preload_builtin_quirks()
 
     # --- Custom cluster definition ---
 

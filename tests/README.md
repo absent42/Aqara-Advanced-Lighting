@@ -35,6 +35,7 @@ tests/
 ├── test_entity_controller.py              # Entity override detection, drift, pause/resume
 ├── test_init.py                           # Integration setup, unload, device migration, and ZHA repair issues
 ├── test_mqtt_backend.py                   # MQTTBackend stale device removal and Z2M repair timer
+├── test_quirks.py                         # ZHA quirk precedence over the zha-quirks built-ins
 ├── test_schedule_cct.py                   # Schedule mode CCT sequences (clock/sunrise/sunset)
 ├── test_segment_sequence_brightness.py    # Brightness override for start_segment_sequence (T1M and T1 Strip)
 ├── test_segment_utils.py                  # Segment parsing and color generation
@@ -44,7 +45,7 @@ tests/
 └── README.md                              # This file
 ```
 
-The Python suite contains roughly 619 tests across 35 files. The frontend has its own Vitest suite (96 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
+The Python suite contains roughly 755 tests across 39 files. The frontend has its own Vitest suite (96 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
 
 ## Running tests
 
@@ -281,6 +282,13 @@ Brightness-override behavior added to the `start_segment_sequence` service in v1
 - **Dispatch**: when brightness is supplied, `light.turn_on` is dispatched once per accepted entity (with the percent → device-converted value) before the segment manager starts the synchronized group
 - **No-op path**: when brightness is omitted, no `light.turn_on` brightness write occurs
 - **Coverage**: T1M (20-segment and 26-segment) and T1 Strip models honor the override
+
+### test_quirks.py (6 tests)
+
+ZHA quirk precedence. ZHA applies the most recently registered quirk for a model, and zha-quirks ships its own T1M and T1 Strip quirks without the effect and segment attributes. Each check runs the production order (integration quirks registered, then `zhaquirks.setup()`) in a fresh interpreter, because zha-quirks registers its quirks as an import side effect that a process runs once.
+
+- Integration quirk resolves for the T1M, T1 Strip and T2 bulb even when ZHA loads its quirks later (3)
+- Every attribute the ZHA backend writes resolves on the applied cluster (3)
 
 ### test_segment_utils.py (18 tests)
 
