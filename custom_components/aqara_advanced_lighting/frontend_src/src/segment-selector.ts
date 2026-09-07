@@ -258,7 +258,6 @@ export class SegmentSelector extends ReorderableStepsMixin(LitElement) {
 
       .grid-toolbar ha-icon-button {
         --ha-icon-button-size: 36px;
-        --mdc-icon-button-size: 36px;
         --mdc-icon-size: 20px;
       }
 

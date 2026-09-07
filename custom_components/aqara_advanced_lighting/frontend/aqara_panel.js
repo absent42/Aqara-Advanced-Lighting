@@ -624,7 +624,6 @@
   .preset-card-actions ha-icon-button,
   .preset-card-actions .favorite-star {
     --ha-icon-button-size: 28px;
-    --mdc-icon-button-size: 28px;
     --mdc-icon-size: 16px;
     opacity: 0.6;
     transition: opacity 0.15s ease;
@@ -990,7 +989,6 @@
 
   .favorite-button-action {
     --ha-icon-button-size: 28px;
-    --mdc-icon-button-size: 28px;
     --mdc-icon-size: 16px;
     opacity: 0.6;
     transition: opacity 0.15s ease;
@@ -1775,7 +1773,6 @@
 
   .step-actions ha-icon-button {
     --ha-icon-button-size: 32px;
-    --mdc-icon-button-size: 32px;
     --mdc-icon-size: 18px;
   }
 
@@ -1887,7 +1884,6 @@
 
   .preset-list-item-actions ha-icon-button {
     --ha-icon-button-size: 32px;
-    --mdc-icon-button-size: 32px;
     --mdc-icon-size: 18px;
   }
 
@@ -2110,7 +2106,6 @@
 
   .icon-clear-btn {
     --ha-icon-button-size: 32px;
-    --mdc-icon-button-size: 32px;
     --mdc-icon-size: 18px;
     color: var(--secondary-text-color);
   }
@@ -3103,7 +3098,6 @@
 
     .running-op-actions ha-icon-button {
       --ha-icon-button-size: 36px;
-      --mdc-icon-button-size: 36px;
       --mdc-icon-size: 20px;
     }
   `,e([pe({attribute:!1})],pt.prototype,"hass",void 0),e([pe({attribute:!1})],pt.prototype,"operations",void 0),e([pe({attribute:!1})],pt.prototype,"presetLookup",void 0),e([pe({attribute:!1})],pt.prototype,"translations",void 0),pt=e([ce("aqara-running-operations")],pt);function ut(e,t){let i=e.filter(e=>!function(e,t){return Be(e.x)===Be(t.x)&&Be(e.y)===Be(t.y)}(e,t));return i=[{x:Be(t.x),y:Be(t.y)},...i],i.length>8&&(i=i.slice(0,8)),i}const gt={draggingIndex:null,dropTargetIndex:null},vt=n`
@@ -3751,7 +3745,6 @@
 
       .grid-toolbar ha-icon-button {
         --ha-icon-button-size: 36px;
-        --mdc-icon-button-size: 36px;
         --mdc-icon-size: 20px;
       }
 
@@ -6670,7 +6663,6 @@
 
     .step-actions ha-icon-button {
       --ha-icon-button-size: 32px;
-      --mdc-icon-button-size: 32px;
       --mdc-icon-size: 18px;
     }
 
@@ -7237,7 +7229,6 @@
 
     .step-actions ha-icon-button {
       --ha-icon-button-size: 32px;
-      --mdc-icon-button-size: 32px;
       --mdc-icon-size: 18px;
     }
 
@@ -7938,7 +7929,6 @@
 
     .color-slot-actions ha-icon-button {
       --ha-icon-button-size: 32px;
-      --mdc-icon-button-size: 32px;
       --mdc-icon-size: 18px;
     }
 
@@ -8058,7 +8048,6 @@
 
       .color-slot-actions ha-icon-button {
         --ha-icon-button-size: 28px;
-        --mdc-icon-button-size: 28px;
         --mdc-icon-size: 16px;
       }
     }

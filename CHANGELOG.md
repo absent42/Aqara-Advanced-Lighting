@@ -17,6 +17,7 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 
   - The Aqara cluster attributes now declare the Aqara manufacturer code explicitly. zigpy 2.1 deprecates manufacturer-specific attributes without one and logged a warning on every lookup.
   - The test suite no longer carries expected failures. The five tests that asserted the pre-2026.8 shared-device model were rewritten or deleted, and assertions that used `device_registry.async_get_device`, which Home Assistant deprecates for 2027.8, now look devices up per config entry.
+  - Eleven leftover `--mdc-icon-button-size` declarations, which Home Assistant stopped reading in 2026.3, were removed from the panel's icon button styles. Each sat beside the `--ha-icon-button-size` declaration that already sizes those buttons, so nothing changes visually. A frontend test now fails if a token the frontend no longer reads is reintroduced.
 
 ## [1.3.3] - 2026/09/01
 

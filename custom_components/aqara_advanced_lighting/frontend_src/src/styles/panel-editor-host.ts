@@ -120,7 +120,6 @@ export const editorHostStyles = css`
 
   .step-actions ha-icon-button {
     --ha-icon-button-size: 32px;
-    --mdc-icon-button-size: 32px;
     --mdc-icon-size: 18px;
   }
 
@@ -232,7 +231,6 @@ export const editorHostStyles = css`
 
   .preset-list-item-actions ha-icon-button {
     --ha-icon-button-size: 32px;
-    --mdc-icon-button-size: 32px;
     --mdc-icon-size: 18px;
   }
 

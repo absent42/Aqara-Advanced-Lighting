@@ -46,7 +46,7 @@ tests/
 └── README.md                              # This file
 ```
 
-The Python suite contains roughly 764 tests across 40 files. The frontend has its own Vitest suite (96 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
+The Python suite contains roughly 764 tests across 40 files. The frontend has its own Vitest suite (121 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
 
 ## Running tests
 
