@@ -48,6 +48,7 @@ from .payload_builder import (
     build_strip_segment_packet,
     build_t1m_segment_packet,
 )
+from .quirks import AQARA_CLUSTER_EP_ATTRIBUTE
 
 if TYPE_CHECKING:
     from .entity_controller import EntityController
@@ -184,6 +185,26 @@ def _get_effect_enum(device_family: str) -> dict[str, int]:
             return EFFECT_ENUM_STRIP
         case _:
             return {}
+
+def find_devices_without_aqara_quirk(gateway: Any) -> list[str]:
+    """List supported devices whose endpoint 1 lacks this integration's cluster.
+
+    ZHA resolves a device's quirk once, so a device it loaded before our quirk
+    was registered keeps the built-in 0xFCC0 cluster, or none, until ZHA is
+    reloaded. Each entry reads "<model> (<ieee>)".
+    """
+    missing: list[str] = []
+    for ieee, device in gateway.devices.items():
+        model_id = _resolve_zha_model(device)
+        if not model_id:
+            continue
+        endpoint = device.device.endpoints.get(DEFAULT_ENDPOINT)
+        cluster = (
+            endpoint.in_clusters.get(CLUSTER_MANU_SPECIFIC_LUMI) if endpoint else None
+        )
+        if getattr(cluster, "ep_attribute", None) != AQARA_CLUSTER_EP_ATTRIBUTE:
+            missing.append(f"{model_id} ({ieee!s})")
+    return missing
 
 class ZHABackend:
     """ZHA backend implementing the DeviceBackend protocol.

@@ -4,7 +4,9 @@ ZHA resolves a device against the most recently registered quirk for its
 (manufacturer, model). zha-quirks ships its own quirks for the T1M and T1
 Strip whose 0xFCC0 cluster lacks the effect and segment attributes, and ZHA
 registers them when its gateway starts, which on a normal startup happens
-after this integration's async_setup. The integration's quirk must still win.
+after this integration's async_setup. The integration's quirk must still win,
+and its attributes must carry the Aqara manufacturer code explicitly, which
+zigpy 2.1 requires to look them up without a deprecation warning.
 
 The production sequence can only be reproduced in a fresh interpreter, because
 zha-quirks registers its quirks as an import side effect that a single process
@@ -42,6 +44,7 @@ PROBE = r"""
 import importlib.util
 import json
 import sys
+import warnings
 from unittest.mock import MagicMock
 
 quirks_path, models = sys.argv[1], sys.argv[2].split(",")
@@ -78,16 +81,31 @@ for model in models:
     entry = getattr(resolved, zha_quirks.QUIRK_REGISTRY_ENTRY_ATTR, None)
     cluster = resolved.endpoints[1].in_clusters[0xFCC0]
     writable = []
+    manufacturer_codes = {}
+    deprecation_warnings = 0
     for attribute_id in (0x051F, 0x0520, 0x0522, 0x0523, 0x0527, 0x0530):
-        try:
-            cluster.find_attribute(attribute_id, manufacturer_code=0x115F)
-        except KeyError:
-            continue
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            try:
+                attr_def = cluster.find_attribute(
+                    attribute_id, manufacturer_code=0x115F
+                )
+            except KeyError:
+                continue
+        deprecation_warnings += sum(
+            1 for w in caught if issubclass(w.category, DeprecationWarning)
+        )
         writable.append(attribute_id)
+        code = attr_def.manufacturer_code
+        manufacturer_codes[str(attribute_id)] = (
+            int(code) if isinstance(code, int) else str(code)
+        )
     result[model] = {
         "source": entry.source.module if entry and entry.source else None,
         "ep_attribute": cluster.ep_attribute,
         "writable": writable,
+        "manufacturer_codes": manufacturer_codes,
+        "deprecation_warnings": deprecation_warnings,
     }
 
 print("RESULT " + json.dumps(result))
@@ -125,3 +143,18 @@ def test_backend_attributes_are_writable(resolved_clusters, model) -> None:
     """Every attribute the ZHA backend writes resolves on the applied cluster."""
     resolved = resolved_clusters[model]
     assert resolved["writable"] == list(REQUIRED_ATTRIBUTES), resolved
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_attributes_declare_the_aqara_manufacturer_code(resolved_clusters, model) -> None:
+    """Each backend attribute carries an explicit Aqara manufacturer code."""
+    resolved = resolved_clusters[model]
+    expected = {str(attribute_id): AQARA_MANUFACTURER_CODE for attribute_id in REQUIRED_ATTRIBUTES}
+    assert resolved["manufacturer_codes"] == expected, resolved
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_attribute_lookup_emits_no_deprecation_warning(resolved_clusters, model) -> None:
+    """Looking an attribute up with the Aqara manufacturer code warns about nothing."""
+    resolved = resolved_clusters[model]
+    assert resolved["deprecation_warnings"] == 0, resolved

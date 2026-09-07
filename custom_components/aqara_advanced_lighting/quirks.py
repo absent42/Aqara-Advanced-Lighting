@@ -6,6 +6,7 @@ This replaces direct zigpy internal manipulation with properly typed
 cluster definitions that ZHA understands natively.
 """
 
+import dataclasses
 import logging
 
 _LOGGER = logging.getLogger(__name__)
@@ -15,6 +16,10 @@ AQARA_MANUFACTURER_CODE = 0x115F
 
 # Cluster ID for Aqara manufacturer-specific attributes
 CLUSTER_MANU_SPECIFIC_LUMI = 0xFCC0
+
+# ep_attribute of the integration's 0xFCC0 cluster. zha_backend uses it to
+# tell our cluster from the zha-quirks built-in one on a resolved device.
+AQARA_CLUSTER_EP_ATTRIBUTE = "aqara_opple"
 
 # Track registration state to avoid duplicate registration
 _quirks_registered = False
@@ -60,6 +65,7 @@ def register_quirks() -> None:
         except ImportError:
             from zigpy.quirks.v2 import CustomCluster, QuirkBuilder
         import zigpy.types as t
+        from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef
     except ImportError:
         _LOGGER.warning(
             "zigpy/zhaquirks not available, ZHA quirks will not be registered. "
@@ -70,6 +76,23 @@ def register_quirks() -> None:
     _preload_builtin_quirks()
 
     # --- Custom cluster definition ---
+
+    # zigpy 2.1 (HA 2026.8) deprecates manufacturer-specific attributes without
+    # an explicit manufacturer_code; older zigpy has no such field. Probe for
+    # it. See the legacy migration removal tracker.
+    _attribute_def_has_manufacturer_code = "manufacturer_code" in {
+        field.name for field in dataclasses.fields(ZCLAttributeDef)
+    }
+
+    def _aqara_attribute(attr_id: int, attr_type: type) -> ZCLAttributeDef:
+        """Manufacturer-specific attribute carrying the Aqara code explicitly."""
+        if _attribute_def_has_manufacturer_code:
+            return ZCLAttributeDef(
+                id=attr_id, type=attr_type, manufacturer_code=AQARA_MANUFACTURER_CODE
+            )
+        return ZCLAttributeDef(
+            id=attr_id, type=attr_type, is_manufacturer_specific=True
+        )
 
     class AqaraLumiCluster(CustomCluster):
         """Aqara manufacturer-specific cluster (0xFCC0).
@@ -86,7 +109,7 @@ def register_quirks() -> None:
 
         cluster_id = CLUSTER_MANU_SPECIFIC_LUMI
         name = "Aqara Opple"
-        ep_attribute = "aqara_opple"
+        ep_attribute = AQARA_CLUSTER_EP_ATTRIBUTE
 
         # Float attributes that need multiplier compensation.
         # ZHA's NumberConfigurationEntity does int(value / multiplier) before
@@ -102,26 +125,24 @@ def register_quirks() -> None:
         }
 
         # Attribute names match Z2M converter naming conventions
-        attributes = CustomCluster.attributes.copy()
-        attributes.update(
-            {
-                0x0515: ("dimming_range_minimum", t.uint8_t, True),
-                0x0516: ("dimming_range_maximum", t.uint8_t, True),
-                0x0517: ("power_on_behavior", t.uint8_t, True),
-                0x051B: ("length", t.uint8_t, True),
-                0x051C: ("audio", t.uint8_t, True),
-                0x051D: ("audio_effect", t.uint32_t, True),
-                0x051E: ("audio_sensitivity", t.uint8_t, True),
-                0x051F: ("effect", t.uint32_t, True),
-                0x0520: ("effect_speed", t.uint8_t, True),
-                0x0522: ("t1m_segment", t.LVBytes, True),
-                0x0523: ("effect_colors", t.LVBytes, True),
-                0x0527: ("strip_segment", t.LVBytes, True),
-                0x0528: ("transition_curve_curvature", t.Single, True),
-                0x052C: ("transition_initial_brightness", t.uint8_t, True),
-                0x0530: ("effect_segments", t.LVBytes, True),
-            }
-        )
+        class AttributeDefs(BaseAttributeDefs):
+            """Aqara lighting attributes on cluster 0xFCC0."""
+
+            dimming_range_minimum = _aqara_attribute(0x0515, t.uint8_t)
+            dimming_range_maximum = _aqara_attribute(0x0516, t.uint8_t)
+            power_on_behavior = _aqara_attribute(0x0517, t.uint8_t)
+            length = _aqara_attribute(0x051B, t.uint8_t)
+            audio = _aqara_attribute(0x051C, t.uint8_t)
+            audio_effect = _aqara_attribute(0x051D, t.uint32_t)
+            audio_sensitivity = _aqara_attribute(0x051E, t.uint8_t)
+            effect = _aqara_attribute(0x051F, t.uint32_t)
+            effect_speed = _aqara_attribute(0x0520, t.uint8_t)
+            t1m_segment = _aqara_attribute(0x0522, t.LVBytes)
+            effect_colors = _aqara_attribute(0x0523, t.LVBytes)
+            strip_segment = _aqara_attribute(0x0527, t.LVBytes)
+            transition_curve_curvature = _aqara_attribute(0x0528, t.Single)
+            transition_initial_brightness = _aqara_attribute(0x052C, t.uint8_t)
+            effect_segments = _aqara_attribute(0x0530, t.LVBytes)
 
         def _update_attribute(self, attrid: int, value: object) -> None:
             """Scale float attribute values for ZHA's multiplier display.

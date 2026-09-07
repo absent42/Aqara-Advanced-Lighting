@@ -7,6 +7,11 @@ All notable changes to the Aqara Advanced Lighting integration will be documente
 ### Fixed
 
   - Effects, segment patterns and segment sequences failed on the ZHA backend, logging a `KeyError` for every attribute write, whenever ZHA started after this integration: on a first installation where ZHA was added afterwards, or when ZHA's start was delayed and retried. ZHA in Home Assistant 2026.8 and later applies the most recently registered quirk for a model, and zha-quirks now ships its own quirks for the T1M and T1 Strip whose cluster does not define the Aqara effect and segment attributes, so whichever registered last decided whether effects could be written. The integration now loads the built-in zha-quirks before registering its own, so its quirk is applied regardless of the order in which ZHA and this integration start.
+  - The one-time ZHA reload that applies the integration's quirks is now decided by inspecting the devices ZHA has resolved, rather than by whether ZHA had finished loading before this integration. A device that ZHA resolved while the integration was still registering its quirks is now corrected as well, the log names the devices a reload is for, and a device that still lacks the quirk after the reload is reported in the log instead of failing silently on its first effect.
+
+### Internal
+
+  - The Aqara cluster attributes now declare the Aqara manufacturer code explicitly. zigpy 2.1 deprecates manufacturer-specific attributes without one and logged a warning on every lookup. A zigpy without the field falls back to the previous definitions.
 
 ## [1.3.3] - 2026/09/01
 

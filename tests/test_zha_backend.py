@@ -15,6 +15,12 @@ from custom_components.aqara_advanced_lighting.const import (
     CONF_BACKEND_TYPE,
     DOMAIN,
 )
+from custom_components.aqara_advanced_lighting.quirks import (
+    AQARA_CLUSTER_EP_ATTRIBUTE,
+)
+from custom_components.aqara_advanced_lighting.zha_backend import (
+    CLUSTER_MANU_SPECIFIC_LUMI,
+)
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -86,6 +92,13 @@ def _make_zha_device(ieee_str: str, model: str = MODEL_T2) -> MagicMock:
     # Underlying zigpy device (for raw model resolution)
     device.device = MagicMock()
     device.device.model = model
+    # Endpoint 1 carries the integration's 0xFCC0 cluster, as on a device ZHA
+    # resolved with our quirk; setup would otherwise reload ZHA for it.
+    cluster = MagicMock()
+    cluster.ep_attribute = AQARA_CLUSTER_EP_ATTRIBUTE
+    endpoint = MagicMock()
+    endpoint.in_clusters = {CLUSTER_MANU_SPECIFIC_LUMI: cluster}
+    device.device.endpoints = {1: endpoint}
     return device
 
 

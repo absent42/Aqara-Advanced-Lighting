@@ -42,10 +42,11 @@ tests/
 ├── test_solar_cct.py                      # Solar mode CCT sequences (elevation-based)
 ├── test_sun_utils.py                      # Solar elevation interpolation
 ├── test_zha_backend.py                    # ZHABackend stale device removal
+├── test_zha_quirk_check.py                # ZHA devices resolved without the integration's quirk
 └── README.md                              # This file
 ```
 
-The Python suite contains roughly 755 tests across 39 files. The frontend has its own Vitest suite (96 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
+The Python suite contains roughly 768 tests across 40 files. The frontend has its own Vitest suite (96 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
 
 ## Running tests
 
@@ -263,7 +264,7 @@ Config flow setup and reconfiguration.
 - Single and multiple instance enforcement
 - Reconfigure flow: update topic, preserve defaults, MQTT validation, empty topic fallback, duplicate topic prevention
 
-### test_init.py (11 tests)
+### test_init.py (14 tests)
 
 Integration initialization, setup, unload, device migration, and ZHA repair issues.
 
@@ -273,6 +274,9 @@ Integration initialization, setup, unload, device migration, and ZHA repair issu
 - v1.3 device migration: removes sole-config-entry devices, removes partial-merge devices, preserves truly merged devices, full clean re-merge
 - ZHA repair issue created on `ImportError` (ZHA not installed), cleared on successful setup
 - ValueError (ZHA gateway not ready) raises `ConfigEntryNotReady` without creating a repair issue
+- ZHA backend: a device ZHA resolved with the built-in quirk triggers one ZHA reload and a retry, and the log names the device
+- ZHA backend: a loaded ZHA whose devices already carry our cluster is not reloaded
+- ZHA backend: after the one reload, setup proceeds and warns about devices still without the quirk
 
 ### test_segment_sequence_brightness.py
 
@@ -283,12 +287,14 @@ Brightness-override behavior added to the `start_segment_sequence` service in v1
 - **No-op path**: when brightness is omitted, no `light.turn_on` brightness write occurs
 - **Coverage**: T1M (20-segment and 26-segment) and T1 Strip models honor the override
 
-### test_quirks.py (6 tests)
+### test_quirks.py (12 tests)
 
 ZHA quirk precedence. ZHA applies the most recently registered quirk for a model, and zha-quirks ships its own T1M and T1 Strip quirks without the effect and segment attributes. Each check runs the production order (integration quirks registered, then `zhaquirks.setup()`) in a fresh interpreter, because zha-quirks registers its quirks as an import side effect that a process runs once.
 
 - Integration quirk resolves for the T1M, T1 Strip and T2 bulb even when ZHA loads its quirks later (3)
 - Every attribute the ZHA backend writes resolves on the applied cluster (3)
+- Each backend attribute declares the Aqara manufacturer code (3)
+- Looking an attribute up with the Aqara manufacturer code emits no deprecation warning (3)
 
 ### test_segment_utils.py (18 tests)
 
@@ -422,6 +428,15 @@ Device automation triggers for sequences and effects.
 - Device present in ZHA scan remains registered and in runtime data
 
 ## Test requirements
+
+### test_zha_quirk_check.py (4 tests)
+
+`find_devices_without_aqara_quirk` lists supported ZHA devices whose endpoint 1 lacks the integration's 0xFCC0 cluster; `async_setup_entry` reloads ZHA once per run for them.
+
+- A device carrying zha-quirks' built-in cluster is listed
+- A device carrying the integration's cluster is not listed
+- A device with no 0xFCC0 cluster on endpoint 1 is listed
+- Unsupported models are ignored
 
 ### Dependencies
 
