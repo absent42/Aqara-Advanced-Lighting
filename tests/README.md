@@ -46,7 +46,7 @@ tests/
 └── README.md                              # This file
 ```
 
-The Python suite contains roughly 766 tests across 40 files. The frontend has its own Vitest suite (121 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
+The Python suite contains roughly 768 tests across 40 files. The frontend has its own Vitest suite (121 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
 
 ## Running tests
 
@@ -412,12 +412,13 @@ Device automation triggers for sequences and effects.
 - **Trigger event map** (5): completeness, CCT/segment sequence type filters, effect no-filter, 22 total trigger types
 - **Merged devices** (2): triggers and entity resolution work on merged devices
 
-### test_mqtt_backend.py (6 tests)
+### test_mqtt_backend.py (8 tests)
 
 `MQTTBackend` stale device removal and Z2M bridge repair timer.
 
 - **Stale device removal** (2): stale device removed from registry and runtime data when missing from bridge/devices message; devices present in both messages are unchanged
 - **Repair timer** (4): repair issue created after 120s with no bridge response; no issue created when bridge responds before timer fires; issue clears when bridge finally responds; timer cancelled on integration unload
+- **Via link** (2): a stale MQTT config entry (ignored or disabled) listed before the real one does not hide the Zigbee2MQTT device; the "Connected via" link still resolves
 
 ### test_zha_backend.py (4 tests)
 

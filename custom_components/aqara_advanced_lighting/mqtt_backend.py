@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from homeassistant.components import mqtt
 from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er, issue_registry as ir
 from homeassistant.helpers.event import async_call_later
@@ -368,14 +369,27 @@ class MQTTBackend:
         bridge/devices whenever a device changes, so a link missed on the
         first message is set on a later one, or on the next restart.
         """
-        mqtt_entries = self.hass.config_entries.async_entries("mqtt")
-        if not mqtt_entries:
-            return None
+        for entry_id in self._mqtt_config_entry_ids():
+            mqtt_device = device_registry.async_get_device_by_identifier(
+                mqtt_identifier, entry_id
+            )
+            if mqtt_device is not None:
+                return mqtt_device.id
+        return None
 
-        mqtt_device = device_registry.async_get_device_by_identifier(
-            mqtt_identifier, mqtt_entries[0].entry_id
+    def _mqtt_config_entry_ids(self) -> list[str]:
+        """Return the ids of MQTT's usable config entries, loaded ones first.
+
+        Device identifiers are unique per config entry, so a lookup must name
+        the entry that owns the device. async_entries() also lists ignored and
+        disabled entries, and a dismissed broker discovery leaves an ignored
+        one that was created before, and so sorts ahead of, the real entry.
+        """
+        entries = self.hass.config_entries.async_entries(
+            "mqtt", include_ignore=False, include_disabled=False
         )
-        return mqtt_device.id if mqtt_device else None
+        entries.sort(key=lambda entry: entry.state is not ConfigEntryState.LOADED)
+        return [entry.entry_id for entry in entries]
 
     def _remove_stale_devices(self, seen_ieee: set[str]) -> None:
         """Remove devices that are no longer in the Z2M device list."""

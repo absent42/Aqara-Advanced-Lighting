@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from homeassistant.config_entries import SOURCE_IGNORE, ConfigEntryDisabler
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import (
     device_registry as dr,
@@ -638,6 +639,65 @@ async def test_device_links_to_mqtt_device_via_device_id(
         "our device must point at the MQTT light as its via device"
     )
 
+
+
+@pytest.mark.parametrize(
+    ("kind", "entry_kwargs"),
+    [
+        ("ignored", {"source": SOURCE_IGNORE}),
+        ("disabled", {"disabled_by": ConfigEntryDisabler.USER}),
+    ],
+)
+async def test_stale_mqtt_entry_listed_first_does_not_hide_the_via_device(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+    kind: str,
+    entry_kwargs: dict,
+) -> None:
+    """The via link must resolve the MQTT device under the loaded MQTT entry.
+
+    A dismissed Mosquitto discovery leaves an ignored MQTT config entry,
+    created before the real one and therefore listed first. Identifier
+    lookups are scoped to a config entry, so asking the stale entry finds
+    nothing and our device card loses its "Connected via" link.
+    """
+    stale = MockConfigEntry(
+        domain="mqtt", title=f"MQTT ({kind})", data={}, unique_id=f"mqtt_{kind}",
+        **entry_kwargs,
+    )
+    stale.add_to_hass(hass)
+    mqtt_config_entry = MockConfigEntry(
+        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
+    )
+    mqtt_config_entry.add_to_hass(hass)
+
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    mqtt_identifier = ("mqtt", f"zigbee2mqtt_{IEEE_A}")
+    mqtt_device = dr_instance.async_get_or_create(
+        config_entry_id=mqtt_config_entry.entry_id,
+        identifiers={mqtt_identifier},
+        name="MQTT Light",
+    )
+
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+    await hass.async_block_till_done()
+
+    our_device = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert our_device is not None, "we must register our own device"
+    assert our_device.via_device_id == mqtt_device.id, (
+        "the via link must resolve the MQTT device under the loaded entry"
+    )
 
 async def test_device_registers_when_mqtt_device_not_yet_known(
     hass: HomeAssistant,
