@@ -12,6 +12,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import CONNECTION_ZIGBEE
@@ -310,15 +311,31 @@ class ZHABackend:
             )
             self._schedule_mapping_retry()
 
-    def _zha_config_entry_id(self) -> str | None:
-        """Return the ZHA config entry id, or None if ZHA is not set up.
+    def _zha_config_entry_ids(self) -> list[str]:
+        """Return the ids of ZHA's usable config entries, loaded ones first.
 
-        Needed on HA 2026.8+ where device identifiers are unique per config
-        entry, so looking a ZHA device up by identifier requires naming the
-        entry that owns it.
+        Device identifiers are unique per config entry, so a lookup must name
+        the entry that owns the device. async_entries() also lists ignored and
+        disabled entries, and a dismissed ZHA discovery leaves an ignored one
+        that was created before, and so sorts ahead of, the real entry.
         """
-        zha_entries = self.hass.config_entries.async_entries("zha")
-        return zha_entries[0].entry_id if zha_entries else None
+        entries = self.hass.config_entries.async_entries(
+            "zha", include_ignore=False, include_disabled=False
+        )
+        entries.sort(key=lambda entry: entry.state is not ConfigEntryState.LOADED)
+        return [entry.entry_id for entry in entries]
+
+    def _find_zha_device(
+        self, device_registry: dr.DeviceRegistry, ieee_str: str
+    ) -> dr.DeviceEntry | None:
+        """Return the registry device ZHA owns for ieee_str, if any."""
+        for entry_id in self._zha_config_entry_ids():
+            device = device_registry.async_get_device_by_identifier(
+                ("zha", ieee_str), entry_id
+            )
+            if device is not None:
+                return device
+        return None
 
     def _zha_via_device_id(
         self, device_registry: dr.DeviceRegistry, ieee_str: str
@@ -334,13 +351,7 @@ class ZHABackend:
         device, so the link cannot be guessed. Passing None also clears a link
         whose device has gone.
         """
-        zha_entry_id = self._zha_config_entry_id()
-        if zha_entry_id is None:
-            return None
-
-        zha_device = device_registry.async_get_device_by_identifier(
-            ("zha", ieee_str), zha_entry_id
-        )
+        zha_device = self._find_zha_device(device_registry, ieee_str)
         return zha_device.id if zha_device else None
 
     def _remove_stale_devices(self, seen_ieee: set[str]) -> None:
@@ -363,22 +374,16 @@ class ZHABackend:
         self._entity_to_ieee.clear()
         mapped_count = 0
 
-        zha_entry_id = self._zha_config_entry_id()
-
         for ieee_str, aqara_device in self.entry.runtime_data.aqara_devices.items():
-            # ZHA registers devices with ("zha", ieee_str) identifiers.
-            # Identifiers are unique per config entry, so the lookup must
-            # name ZHA's entry rather than searching globally.
-            ha_device = (
-                dev_reg.async_get_device_by_identifier(("zha", ieee_str), zha_entry_id)
-                if zha_entry_id is not None
-                else None
-            )
+            # ZHA registers devices with ("zha", ieee_str) identifiers, unique
+            # per config entry, so the lookup names ZHA's entries.
+            ha_device = self._find_zha_device(dev_reg, ieee_str)
             if not ha_device:
                 _LOGGER.debug(
-                    "No HA device found for ZHA device %s (%s)",
+                    "No HA device found for ZHA device %s (%s) under ZHA entries %s",
                     aqara_device.name,
                     ieee_str,
+                    self._zha_config_entry_ids(),
                 )
                 continue
 

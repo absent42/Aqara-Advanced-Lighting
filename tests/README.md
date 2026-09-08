@@ -46,7 +46,7 @@ tests/
 └── README.md                              # This file
 ```
 
-The Python suite contains roughly 764 tests across 40 files. The frontend has its own Vitest suite (121 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
+The Python suite contains roughly 766 tests across 40 files. The frontend has its own Vitest suite (121 tests) under `custom_components/aqara_advanced_lighting/frontend_src/`; see [the frontend README](../custom_components/aqara_advanced_lighting/frontend_src/README.md#testing) for details.
 
 ## Running tests
 
@@ -419,12 +419,13 @@ Device automation triggers for sequences and effects.
 - **Stale device removal** (2): stale device removed from registry and runtime data when missing from bridge/devices message; devices present in both messages are unchanged
 - **Repair timer** (4): repair issue created after 120s with no bridge response; no issue created when bridge responds before timer fires; issue clears when bridge finally responds; timer cancelled on integration unload
 
-### test_zha_backend.py (2 tests)
+### test_zha_backend.py (4 tests)
 
 `ZHABackend` stale device removal at startup.
 
 - Stale device fully removed from registry and runtime data when absent from ZHA scan
 - Device present in ZHA scan remains registered and in runtime data
+- A stale ZHA config entry (ignored or disabled) listed before the loaded one does not hide the device: the light still maps and the via link resolves (2)
 
 ## Test requirements
 
