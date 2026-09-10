@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from homeassistant.config_entries import SOURCE_IGNORE, ConfigEntryDisabler
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import (
     device_registry as dr,
@@ -220,79 +221,6 @@ async def test_stale_device_removed_when_missing_from_bridge_devices(
     assert IEEE_B not in runtime.aqara_devices, "device B must be removed from runtime_data.aqara_devices"
 
 
-async def test_stale_device_removal_skips_sole_owner_if_other_entries_present(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_state_manager,
-    mock_cct_sequence_manager,
-    mock_segment_sequence_manager,
-    mock_mqtt_wait,
-) -> None:
-    """Stale merged device has our entry_id removed but device itself stays.
-
-    When a device is shared with the MQTT integration (two config entries),
-    stale removal must call async_update_device(remove_config_entry_id=...)
-    instead of async_remove_device, so the MQTT integration's device survives.
-    """
-    # Create a second config entry to simulate the MQTT integration
-    mqtt_config_entry = MockConfigEntry(
-        domain="mqtt",
-        title="MQTT",
-        data={},
-        unique_id="mqtt_test",
-    )
-    mqtt_config_entry.add_to_hass(hass)
-
-    entry, subscribe_calls = await _setup_entry_with_real_backend(
-        hass, mock_config_entry, mock_state_manager,
-        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
-    )
-
-    # First: register device A via bridge/devices (creates our device)
-    first_payload = _make_bridge_devices_payload(IEEE_A)
-    _fire_bridge_devices(subscribe_calls, first_payload)
-    await hass.async_block_till_done()
-
-    dr_instance = dr.async_get(hass)
-    our_devices = dr.async_entries_for_config_entry(dr_instance, entry.entry_id)
-    device_a = next(
-        (
-            dev for dev in our_devices
-            for ident_dom, ident_val in dev.identifiers
-            if ident_dom == DOMAIN and ident_val == IEEE_A
-        ),
-        None,
-    )
-    assert device_a is not None, "device A should be registered"
-
-    # Simulate merging: add the MQTT config entry to device A
-    dr_instance.async_update_device(
-        device_a.id,
-        add_config_entry_id=mqtt_config_entry.entry_id,
-    )
-    merged = dr_instance.async_get(device_a.id)
-    assert len(merged.config_entries) == 2, "device should now have two config entries"
-
-    device_a_id = device_a.id
-
-    # Second bridge/devices — empty (device A is now stale)
-    second_payload = json.dumps([])
-    _fire_bridge_devices(subscribe_calls, second_payload)
-    await hass.async_block_till_done()
-
-    # Device should still exist (not fully removed) because MQTT still owns it
-    surviving_device = dr_instance.async_get(device_a_id)
-    assert surviving_device is not None, (
-        "merged device should still exist after stale removal "
-        "(MQTT config entry still owns it)"
-    )
-
-    # But OUR config entry should no longer be among its config entries
-    assert entry.entry_id not in surviving_device.config_entries, (
-        "our config entry should be removed from the merged device"
-    )
-
-
 async def test_non_stale_devices_unchanged(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -477,7 +405,7 @@ async def test_device_survives_config_entry_reload(
     await hass.async_block_till_done()
 
     dr_instance = dr.async_get(hass)
-    device_before = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    device_before = dr_instance.async_get_device_by_identifier((DOMAIN, IEEE_A), entry.entry_id)
     assert device_before is not None, "device A should be registered"
     device_id_before = device_before.id
 
@@ -494,7 +422,7 @@ async def test_device_survives_config_entry_reload(
         assert await hass.config_entries.async_reload(entry.entry_id)
         await hass.async_block_till_done()
 
-    device_after = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    device_after = dr_instance.async_get_device_by_identifier((DOMAIN, IEEE_A), entry.entry_id)
     assert device_after is not None, "device must survive an entry reload"
     assert device_after.id == device_id_before, (
         "device ID must be stable across reloads so device automations and "
@@ -524,10 +452,7 @@ async def test_single_config_entry_registry_keeps_our_identifier(
     condition stopped resolving.
 
     Asserts on the registry calls we make rather than on resulting registry
-    state: this suite runs against a pre-2026.8 core where identifiers are
-    still globally unique, so async_get_or_create would match the MQTT
-    integration's device by the shared mqtt identifier and merge into it.
-    Per-config-entry uniqueness cannot be simulated by patching the flag.
+    state, so the test pins our behaviour rather than the registry's.
     """
     mqtt_config_entry = MockConfigEntry(
         domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
@@ -549,11 +474,7 @@ async def test_single_config_entry_registry_keeps_our_identifier(
     )
 
     registry_cls = type(dr_instance)
-    with patch(
-        "custom_components.aqara_advanced_lighting.mqtt_backend."
-        "_SINGLE_CONFIG_ENTRY_REGISTRY",
-        True,
-    ), patch.object(
+    with patch.object(
         registry_cls, "async_get_or_create", autospec=True,
         side_effect=registry_cls.async_get_or_create,
     ) as spy_create, patch.object(
@@ -629,7 +550,7 @@ async def test_firmware_version_reported_and_inherited_value_cleared(
     )
     await hass.async_block_till_done()
 
-    device = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    device = dr_instance.async_get_device_by_identifier((DOMAIN, IEEE_A), entry.entry_id)
     assert device is not None
     assert device.sw_version == "0122052017", (
         "sw_version must come from the Z2M software_build_id, replacing any "
@@ -667,82 +588,11 @@ async def test_firmware_version_absent_from_payload_clears_inherited(
     _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
     await hass.async_block_till_done()
 
-    device = dr_instance.async_get_device(identifiers={(DOMAIN, IEEE_A)})
+    device = dr_instance.async_get_device_by_identifier((DOMAIN, IEEE_A), entry.entry_id)
     assert device is not None
     assert device.sw_version is None, (
         "an absent software_build_id must clear the inherited value, not "
         "leave another integration's firmware string in place"
-    )
-
-
-async def test_legacy_merge_uses_new_identifiers_not_merge_identifiers(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_state_manager,
-    mock_cct_sequence_manager,
-    mock_segment_sequence_manager,
-    mock_mqtt_wait,
-) -> None:
-    """The pre-2026.8 merge path must not use the deprecated merge_identifiers.
-
-    merge_identifiers is deprecated and removed in HA Core 2027.9; the
-    replacement is to compute the complete set and pass new_identifiers.
-    new_identifiers has been available far longer than our minimum core, so
-    the legacy branch can use it without a version probe.
-
-    Asserts on the registry calls rather than resulting state, for the reason
-    given in test_single_config_entry_registry_keeps_our_identifier: this
-    branch models a core whose identifier uniqueness rules cannot be
-    simulated by patching the flag.
-    """
-    mqtt_config_entry = MockConfigEntry(
-        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
-    )
-    mqtt_config_entry.add_to_hass(hass)
-
-    entry, subscribe_calls = await _setup_entry_with_real_backend(
-        hass, mock_config_entry, mock_state_manager,
-        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
-    )
-
-    dr_instance = dr.async_get(hass)
-    mqtt_identifier = ("mqtt", f"zigbee2mqtt_{IEEE_A}")
-    dr_instance.async_get_or_create(
-        config_entry_id=mqtt_config_entry.entry_id,
-        identifiers={mqtt_identifier},
-        name="MQTT Light",
-    )
-
-    registry_cls = type(dr_instance)
-    with patch(
-        "custom_components.aqara_advanced_lighting.mqtt_backend."
-        "_SINGLE_CONFIG_ENTRY_REGISTRY",
-        False,
-    ), patch.object(
-        registry_cls, "async_update_device", autospec=True,
-        side_effect=registry_cls.async_update_device,
-    ) as spy_update:
-        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
-        await hass.async_block_till_done()
-
-    assert not [
-        call for call in spy_update.call_args_list
-        if "merge_identifiers" in call.kwargs
-    ], "merge_identifiers is deprecated; pass the complete new_identifiers set"
-
-    merges = [
-        call for call in spy_update.call_args_list
-        if "new_identifiers" in call.kwargs
-    ]
-    assert merges, "the legacy path must still add our identifier to the device"
-
-    new_identifiers = merges[-1].kwargs["new_identifiers"]
-    assert (DOMAIN, IEEE_A) in new_identifiers, (
-        "our identifier must be added or device triggers cannot resolve"
-    )
-    assert mqtt_identifier in new_identifiers, (
-        "new_identifiers replaces the whole set, so the identifiers already "
-        "on the MQTT device must be carried over rather than dropped"
     )
 
 
@@ -778,13 +628,8 @@ async def test_device_links_to_mqtt_device_via_device_id(
         name="MQTT Light",
     )
 
-    with patch(
-        "custom_components.aqara_advanced_lighting.mqtt_backend."
-        "_SINGLE_CONFIG_ENTRY_REGISTRY",
-        True,
-    ):
-        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
-        await hass.async_block_till_done()
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+    await hass.async_block_till_done()
 
     our_device = dr_instance.async_get_device_by_identifier(
         (DOMAIN, IEEE_A), entry.entry_id
@@ -794,6 +639,65 @@ async def test_device_links_to_mqtt_device_via_device_id(
         "our device must point at the MQTT light as its via device"
     )
 
+
+
+@pytest.mark.parametrize(
+    ("kind", "entry_kwargs"),
+    [
+        ("ignored", {"source": SOURCE_IGNORE}),
+        ("disabled", {"disabled_by": ConfigEntryDisabler.USER}),
+    ],
+)
+async def test_stale_mqtt_entry_listed_first_does_not_hide_the_via_device(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    mock_mqtt_wait,
+    kind: str,
+    entry_kwargs: dict,
+) -> None:
+    """The via link must resolve the MQTT device under the loaded MQTT entry.
+
+    A dismissed Mosquitto discovery leaves an ignored MQTT config entry,
+    created before the real one and therefore listed first. Identifier
+    lookups are scoped to a config entry, so asking the stale entry finds
+    nothing and our device card loses its "Connected via" link.
+    """
+    stale = MockConfigEntry(
+        domain="mqtt", title=f"MQTT ({kind})", data={}, unique_id=f"mqtt_{kind}",
+        **entry_kwargs,
+    )
+    stale.add_to_hass(hass)
+    mqtt_config_entry = MockConfigEntry(
+        domain="mqtt", title="MQTT", data={}, unique_id="mqtt_test",
+    )
+    mqtt_config_entry.add_to_hass(hass)
+
+    entry, subscribe_calls = await _setup_entry_with_real_backend(
+        hass, mock_config_entry, mock_state_manager,
+        mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
+    )
+
+    dr_instance = dr.async_get(hass)
+    mqtt_identifier = ("mqtt", f"zigbee2mqtt_{IEEE_A}")
+    mqtt_device = dr_instance.async_get_or_create(
+        config_entry_id=mqtt_config_entry.entry_id,
+        identifiers={mqtt_identifier},
+        name="MQTT Light",
+    )
+
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+    await hass.async_block_till_done()
+
+    our_device = dr_instance.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), entry.entry_id
+    )
+    assert our_device is not None, "we must register our own device"
+    assert our_device.via_device_id == mqtt_device.id, (
+        "the via link must resolve the MQTT device under the loaded entry"
+    )
 
 async def test_device_registers_when_mqtt_device_not_yet_known(
     hass: HomeAssistant,
@@ -815,13 +719,8 @@ async def test_device_registers_when_mqtt_device_not_yet_known(
         mock_cct_sequence_manager, mock_segment_sequence_manager, mock_mqtt_wait,
     )
 
-    with patch(
-        "custom_components.aqara_advanced_lighting.mqtt_backend."
-        "_SINGLE_CONFIG_ENTRY_REGISTRY",
-        True,
-    ):
-        _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
-        await hass.async_block_till_done()
+    _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
+    await hass.async_block_till_done()
 
     dr_instance = dr.async_get(hass)
     our_device = dr_instance.async_get_device_by_identifier(
@@ -1028,10 +927,6 @@ async def test_via_device_link_backfilled_when_mqtt_device_appears_late(
 
     with patch.object(
         type(backend), "_async_retry_entity_mapping", new_callable=AsyncMock,
-    ), patch(
-        "custom_components.aqara_advanced_lighting.mqtt_backend."
-        "_SINGLE_CONFIG_ENTRY_REGISTRY",
-        True,
     ):
         _fire_bridge_devices(subscribe_calls, _make_bridge_devices_payload(IEEE_A))
         await hass.async_block_till_done()
@@ -1054,10 +949,6 @@ async def test_via_device_link_backfilled_when_mqtt_device_appears_late(
         "custom_components.aqara_advanced_lighting.mqtt_backend."
         "_MAPPING_RETRY_INTERVAL",
         0,
-    ), patch(
-        "custom_components.aqara_advanced_lighting.mqtt_backend."
-        "_SINGLE_CONFIG_ENTRY_REGISTRY",
-        True,
     ):
         await backend._async_retry_entity_mapping()
 

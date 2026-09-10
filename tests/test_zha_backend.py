@@ -6,14 +6,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from homeassistant.config_entries import (
+    SOURCE_IGNORE,
+    ConfigEntryDisabler,
+    ConfigEntryState,
+)
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import CONNECTION_ZIGBEE
 
 from custom_components.aqara_advanced_lighting.const import (
     BACKEND_ZHA,
     CONF_BACKEND_TYPE,
     DOMAIN,
+)
+from custom_components.aqara_advanced_lighting.quirks import (
+    AQARA_CLUSTER_EP_ATTRIBUTE,
+)
+from custom_components.aqara_advanced_lighting.zha_backend import (
+    CLUSTER_MANU_SPECIFIC_LUMI,
+    ZHABackend,
 )
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -86,6 +98,13 @@ def _make_zha_device(ieee_str: str, model: str = MODEL_T2) -> MagicMock:
     # Underlying zigpy device (for raw model resolution)
     device.device = MagicMock()
     device.device.model = model
+    # Endpoint 1 carries the integration's 0xFCC0 cluster, as on a device ZHA
+    # resolved with our quirk; setup would otherwise reload ZHA for it.
+    cluster = MagicMock()
+    cluster.ep_attribute = AQARA_CLUSTER_EP_ATTRIBUTE
+    endpoint = MagicMock()
+    endpoint.in_clusters = {CLUSTER_MANU_SPECIFIC_LUMI: cluster}
+    device.device.endpoints = {1: endpoint}
     return device
 
 
@@ -192,76 +211,6 @@ async def test_stale_zha_device_removed_when_missing_from_scan(
     )
 
 
-async def test_stale_zha_merged_device_releases_claim_only(
-    hass: HomeAssistant,
-    mock_config_entry_zha: MockConfigEntry,
-    mock_state_manager,
-    mock_cct_sequence_manager,
-    mock_segment_sequence_manager,
-) -> None:
-    """Stale merged device has our entry_id removed but the device itself survives.
-
-    When device_a is shared between our config entry and a second config entry
-    (e.g. ZHA integration), stale removal must call
-    async_update_device(remove_config_entry_id=...) rather than
-    async_remove_device, so the other integration's device is not destroyed.
-    """
-    # A second config entry simulating the ZHA integration owning the device.
-    zha_config_entry = MockConfigEntry(
-        domain="zha",
-        title="ZHA",
-        data={},
-        unique_id="zha_main",
-    )
-    zha_config_entry.add_to_hass(hass)
-
-    mock_config_entry_zha.add_to_hass(hass)
-
-    device_reg = dr.async_get(hass)
-
-    # Create device_a with BOTH config entries (merged device).
-    device_a = device_reg.async_get_or_create(
-        config_entry_id=zha_config_entry.entry_id,
-        identifiers={("zha", IEEE_A)},
-        name="device_a",
-        manufacturer="Aqara",
-        model="T2 Bulb",
-    )
-    # Add our config entry and our identifier to the same device.
-    device_reg.async_update_device(
-        device_a.id,
-        add_config_entry_id=mock_config_entry_zha.entry_id,
-        merge_identifiers={(DOMAIN, IEEE_A)},
-    )
-    merged = device_reg.async_get(device_a.id)
-    assert len(merged.config_entries) == 2, (
-        "device_a should have two config entries before setup"
-    )
-    device_a_id = device_a.id
-
-    # ZHA gateway returns no devices — device_a is stale from our perspective.
-    gateway = _make_gateway()  # empty
-
-    with patch(
-        "homeassistant.components.zha.helpers.get_zha_gateway",
-        return_value=gateway,
-    ):
-        assert await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
-        await hass.async_block_till_done()
-
-    # Device should still exist because ZHA still owns it.
-    surviving = device_reg.async_get(device_a_id)
-    assert surviving is not None, (
-        "merged device_a should still exist after stale removal "
-        "(ZHA config entry still owns it)"
-    )
-
-    # But OUR config entry should have been released.
-    assert mock_config_entry_zha.entry_id not in surviving.config_entries, (
-        "our config entry should be removed from the merged device"
-    )
-
-
 async def test_non_stale_zha_devices_unchanged(
     hass: HomeAssistant,
     mock_config_entry_zha: MockConfigEntry,
@@ -302,7 +251,7 @@ async def test_non_stale_zha_devices_unchanged(
     assert still_there is not None, (
         "device_a should remain registered when present in ZHA gateway"
     )
-    assert mock_config_entry_zha.entry_id in still_there.config_entries, (
+    assert still_there.primary_config_entry == mock_config_entry_zha.entry_id, (
         "our config entry should still be on device_a"
     )
 
@@ -430,3 +379,72 @@ async def test_entity_mapping_retry_cancelled_on_shutdown(
     with contextlib.suppress(asyncio.CancelledError):
         await task
     assert task.cancelled(), "the pending retry must be cancelled"
+
+
+@pytest.mark.parametrize(
+    ("kind", "entry_kwargs"),
+    [
+        ("ignored", {"source": SOURCE_IGNORE}),
+        ("disabled", {"disabled_by": ConfigEntryDisabler.USER}),
+    ],
+)
+async def test_stale_zha_entry_listed_first_does_not_hide_the_real_one(
+    hass: HomeAssistant,
+    mock_config_entry_zha: MockConfigEntry,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    kind: str,
+    entry_kwargs: dict,
+) -> None:
+    """Device lookups must use the loaded ZHA entry, not the first one listed.
+
+    A dismissed ZHA discovery leaves an ignored config entry, created before
+    the real one and therefore listed first. Identifier lookups are scoped to
+    a config entry, so asking the stale entry finds nothing and no light is
+    mapped even though the device and its entities are all in the registry.
+    """
+    stale = MockConfigEntry(
+        domain="zha", title=f"ZHA ({kind})", data={}, unique_id=f"zha_{kind}",
+        **entry_kwargs,
+    )
+    stale.add_to_hass(hass)
+    zha_config_entry = MockConfigEntry(
+        domain="zha", title="ZHA", data={}, unique_id="zha_main",
+    )
+    zha_config_entry.add_to_hass(hass)
+    zha_config_entry.mock_state(hass, ConfigEntryState.LOADED)
+    mock_config_entry_zha.add_to_hass(hass)
+
+    device_reg = dr.async_get(hass)
+    zha_device = device_reg.async_get_or_create(
+        config_entry_id=zha_config_entry.entry_id,
+        identifiers={("zha", IEEE_A)},
+        name="ZHA Light",
+    )
+    light = er.async_get(hass).async_get_or_create(
+        "light", "zha", f"{IEEE_A}-1",
+        device_id=zha_device.id, config_entry=zha_config_entry,
+    )
+
+    gateway = _make_gateway(IEEE_A)
+    with patch(
+        "homeassistant.components.zha.helpers.get_zha_gateway",
+        return_value=gateway,
+    ), patch.object(ZHABackend, "_schedule_mapping_retry"):
+        assert await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
+        await hass.async_block_till_done()
+
+    backend = _get_zha_backend(hass, mock_config_entry_zha)
+    assert backend.get_device_for_entity(light.entity_id) is not None, (
+        "the ZHA light must be mapped to its Aqara device"
+    )
+    assert mock_config_entry_zha.runtime_data.entity_mapping_ready
+
+    our_device = device_reg.async_get_device_by_identifier(
+        (DOMAIN, IEEE_A), mock_config_entry_zha.entry_id
+    )
+    assert our_device is not None
+    assert our_device.via_device_id == zha_device.id, (
+        "the via link must resolve the ZHA device under the loaded entry"
+    )

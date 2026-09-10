@@ -1,5 +1,6 @@
 """Test the Aqara Advanced Lighting integration initialization."""
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -271,63 +272,6 @@ async def test_setup_does_not_prune_devices_we_own(
     )
 
 
-async def test_migrate_preserves_truly_merged_devices(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_mqtt_client: MagicMock,
-    mock_state_manager: MagicMock,
-    mock_cct_sequence_manager: MagicMock,
-    mock_segment_sequence_manager: MagicMock,
-    mock_mqtt_wait: AsyncMock,
-) -> None:
-    """Test that truly merged devices (multiple config entries) are preserved.
-
-    A device shared between our integration and MQTT/ZHA has multiple config
-    entries. The migration must not remove these.
-    """
-    mock_config_entry.add_to_hass(hass)
-
-    # Create a second config entry to simulate the MQTT integration
-    mqtt_config_entry = MockConfigEntry(
-        domain="mqtt",
-        title="MQTT",
-        data={},
-        unique_id="mqtt",
-    )
-    mqtt_config_entry.add_to_hass(hass)
-
-    device_reg = dr.async_get(hass)
-
-    # Create device with MQTT config entry first
-    merged_device = device_reg.async_get_or_create(
-        config_entry_id=mqtt_config_entry.entry_id,
-        identifiers={("mqtt", "zigbee2mqtt_0x00158d0001abcdef")},
-        name="bedroom_light",
-        manufacturer="Aqara",
-        model="E27 CCT led bulb",
-    )
-    # Add our config entry to the same device
-    device_reg.async_get_or_create(
-        config_entry_id=mock_config_entry.entry_id,
-        identifiers={("mqtt", "zigbee2mqtt_0x00158d0001abcdef")},
-    )
-    device_reg.async_update_device(
-        merged_device.id,
-        merge_identifiers={(DOMAIN, "0x00158d0001abcdef")},
-    )
-    merged_device_id = merged_device.id
-
-    # Verify it has both config entries
-    updated = device_reg.async_get(merged_device_id)
-    assert len(updated.config_entries) == 2
-
-    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
-
-    # Truly merged device should still exist
-    assert device_reg.async_get(merged_device_id) is not None
-
-
 async def test_v1_3_migration_removes_all_devices(
     hass: HomeAssistant,
     mock_config_entry_v1_2: MockConfigEntry,
@@ -473,7 +417,7 @@ async def test_zha_repair_issue_clears_on_successful_setup(
         mock_zha_backend_cls.return_value = mock_backend
         with patch(
             "homeassistant.components.zha.helpers.get_zha_gateway",
-            return_value=MagicMock(),
+            return_value=MagicMock(devices={}),
         ):
             await hass.config_entries.async_reload(mock_config_entry_zha.entry_id)
             await hass.async_block_till_done()
@@ -616,3 +560,149 @@ async def test_setup_entry_offers_device_removal(
         "async_remove_config_entry_device must be exposed on the integration "
         "module so the device page offers a delete action"
     )
+
+
+# --- ZHA quirk reload -------------------------------------------------------
+
+T1M_MODEL = "lumi.light.acn032"
+T1M_IEEE = "54:ef:44:10:01:26:e5:c7"
+
+
+def _make_zha_gateway_with_device(model: str, ep_attribute: str) -> MagicMock:
+    """Build a ZHA gateway holding one device whose 0xFCC0 cluster has ep_attribute."""
+    cluster = MagicMock()
+    cluster.ep_attribute = ep_attribute
+    endpoint = MagicMock()
+    endpoint.in_clusters = {0xFCC0: cluster}
+    device = MagicMock()
+    device.model = model
+    device.device.model = model
+    device.device.endpoints = {1: endpoint}
+    gateway = MagicMock()
+    gateway.devices = {T1M_IEEE: device}
+    return gateway
+
+
+@pytest.fixture
+def loaded_zha_entry(hass: HomeAssistant) -> MockConfigEntry:
+    """A ZHA config entry that Home Assistant considers loaded."""
+    entry = MockConfigEntry(domain="zha", title="ZHA", data={})
+    entry.add_to_hass(hass)
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+    return entry
+
+
+@pytest.fixture
+def mock_zha_backend():
+    """Mock ZHABackend so setup completes without a real gateway."""
+    with patch(
+        "custom_components.aqara_advanced_lighting.zha_backend.ZHABackend"
+    ) as mock_backend_cls:
+        backend = MagicMock()
+        backend.async_setup = AsyncMock()
+        backend.async_shutdown = AsyncMock()
+        mock_backend_cls.return_value = backend
+        yield backend
+
+
+@pytest.fixture
+def zha_reload(hass: HomeAssistant, loaded_zha_entry):
+    """Intercept reloads of the ZHA entry; other entries reload for real."""
+    original_reload = hass.config_entries.async_reload
+
+    async def fake_reload(entry_id: str) -> bool:
+        if entry_id == loaded_zha_entry.entry_id:
+            return True
+        return await original_reload(entry_id)
+
+    with patch.object(
+        hass.config_entries, "async_reload", side_effect=fake_reload
+    ) as mock_reload:
+        yield mock_reload
+
+
+def _zha_reload_count(mock_reload, zha_entry) -> int:
+    return [call.args[0] for call in mock_reload.await_args_list].count(
+        zha_entry.entry_id
+    )
+
+
+async def test_zha_setup_reloads_zha_for_devices_without_quirk(
+    hass: HomeAssistant,
+    mock_config_entry_zha,
+    loaded_zha_entry,
+    zha_reload,
+    mock_zha_backend,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    caplog,
+):
+    """A device ZHA resolved with the built-in quirk triggers one ZHA reload and a retry."""
+    caplog.set_level(logging.INFO, logger="custom_components.aqara_advanced_lighting")
+    mock_config_entry_zha.add_to_hass(hass)
+    gateway = _make_zha_gateway_with_device(T1M_MODEL, "opple_cluster")
+
+    with patch(
+        "homeassistant.components.zha.helpers.get_zha_gateway", return_value=gateway
+    ):
+        assert not await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
+        await hass.async_block_till_done()
+
+    assert mock_config_entry_zha.state is ConfigEntryState.SETUP_RETRY
+    assert _zha_reload_count(zha_reload, loaded_zha_entry) == 1
+    assert f"{T1M_MODEL} ({T1M_IEEE})" in caplog.text
+
+
+async def test_zha_setup_skips_reload_when_devices_have_quirk(
+    hass: HomeAssistant,
+    mock_config_entry_zha,
+    loaded_zha_entry,
+    zha_reload,
+    mock_zha_backend,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+):
+    """A loaded ZHA whose devices already carry our cluster is left alone."""
+    mock_config_entry_zha.add_to_hass(hass)
+    gateway = _make_zha_gateway_with_device(T1M_MODEL, "aqara_opple")
+
+    with patch(
+        "homeassistant.components.zha.helpers.get_zha_gateway", return_value=gateway
+    ):
+        assert await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
+        await hass.async_block_till_done()
+
+    assert mock_config_entry_zha.state is ConfigEntryState.LOADED
+    assert _zha_reload_count(zha_reload, loaded_zha_entry) == 0
+
+
+async def test_zha_setup_reloads_zha_only_once_per_run(
+    hass: HomeAssistant,
+    mock_config_entry_zha,
+    loaded_zha_entry,
+    zha_reload,
+    mock_zha_backend,
+    mock_state_manager,
+    mock_cct_sequence_manager,
+    mock_segment_sequence_manager,
+    caplog,
+):
+    """After the one reload, setup proceeds and warns about devices still without the quirk."""
+    mock_config_entry_zha.add_to_hass(hass)
+    gateway = _make_zha_gateway_with_device(T1M_MODEL, "opple_cluster")
+
+    with patch(
+        "homeassistant.components.zha.helpers.get_zha_gateway", return_value=gateway
+    ):
+        assert not await hass.config_entries.async_setup(mock_config_entry_zha.entry_id)
+        await hass.async_block_till_done()
+        caplog.clear()
+        assert await hass.config_entries.async_reload(mock_config_entry_zha.entry_id)
+        await hass.async_block_till_done()
+
+    assert mock_config_entry_zha.state is ConfigEntryState.LOADED
+    assert _zha_reload_count(zha_reload, loaded_zha_entry) == 1
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(f"{T1M_MODEL} ({T1M_IEEE})" in r.getMessage() for r in warnings), caplog.text

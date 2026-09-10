@@ -269,7 +269,6 @@ export const presetStyles = css`
   .preset-card-actions ha-icon-button,
   .preset-card-actions .favorite-star {
     --ha-icon-button-size: 28px;
-    --mdc-icon-button-size: 28px;
     --mdc-icon-size: 16px;
     opacity: 0.6;
     transition: opacity 0.15s ease;

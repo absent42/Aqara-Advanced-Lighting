@@ -200,7 +200,7 @@
       "message": "Invalid color format: expected dict or list, got {type}. Please provide colors as either a dictionary (XY or RGB) or a list [r, g, b]."
     },
     "unsupported_entities": {
-      "message": "The following entities are not supported Aqara devices: {entity_list}. Please select only Aqara T1, T1M, T1 Strip, or T2 bulb entities that are connected via Zigbee2MQTT."
+      "message": "The following entities are not supported Aqara devices: {entity_list}. Please select only Aqara T1, T1M, T1 Strip, or T2 bulb entities that are connected via Zigbee2MQTT or ZHA."
     },
     "no_rgb_entities": {
       "message": "None of the selected lights support RGB color: {entity_list}. Dynamic scenes require lights with RGB color capability."

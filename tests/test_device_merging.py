@@ -1,9 +1,11 @@
-"""Test HA device registry merging behavior for Aqara Advanced Lighting.
+"""Test how our devices sit beside Zigbee2MQTT's in the device registry.
 
-These tests validate that Home Assistant's device registry correctly merges
-devices when multiple integrations register the same physical device using
-MAC-based connections. This is the mechanism that prevents duplicate devices
-when both Z2M/ZHA and our integration register the same Aqara light.
+Since Home Assistant 2026.8 a device belongs to exactly one config entry and
+identifiers and connections are unique per config entry, so an Aqara light has
+two device entries: the one Zigbee2MQTT or ZHA owns, carrying the light entity,
+and ours, carrying the device triggers and conditions. Ours also carries the
+MQTT identifier so the frontend's "Linked Devices" element cross-links the two.
+These tests pin the registry behaviour the MQTT backend relies on.
 """
 
 import pytest
@@ -21,6 +23,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 # Test constants matching a typical Aqara Zigbee device
 TEST_IEEE = "0x00158d0001abcdef"
 TEST_MAC = "00:15:8d:00:01:ab:cd:ef"
+MQTT_IDENTIFIER = ("mqtt", f"zigbee2mqtt_bridge_{TEST_IEEE}")
+OUR_IDENTIFIER = (DOMAIN, TEST_IEEE)
 
 
 @pytest.fixture
@@ -45,102 +49,82 @@ def aal_config_entry() -> MockConfigEntry:
     )
 
 
-async def test_mqtt_backend_registers_device_with_mac_connection(
-    hass: HomeAssistant,
-    z2m_config_entry: MockConfigEntry,
-    aal_config_entry: MockConfigEntry,
-) -> None:
-    """Test that devices merge when Z2M and our integration share a MAC connection.
-
-    When Z2M discovers a Zigbee device, it registers it with a MAC connection
-    and its own identifier. When our integration later registers the same
-    physical device with the same MAC connection (plus our own identifier),
-    HA should merge them into a single device entry.
-    """
-    z2m_config_entry.add_to_hass(hass)
-    aal_config_entry.add_to_hass(hass)
-
-    device_reg = dr.async_get(hass)
-
-    # Step 1: Z2M discovers and registers the device first
-    z2m_device = device_reg.async_get_or_create(
-        config_entry_id=z2m_config_entry.entry_id,
+def _register_z2m_device(
+    device_reg: dr.DeviceRegistry, entry: MockConfigEntry
+) -> dr.DeviceEntry:
+    """Register the light the way Zigbee2MQTT discovery does."""
+    return device_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
         connections={(dr.CONNECTION_NETWORK_MAC, TEST_MAC)},
-        identifiers={("mqtt", f"zigbee2mqtt_bridge_{TEST_IEEE}")},
+        identifiers={MQTT_IDENTIFIER},
         name="Bedroom Light",
         manufacturer="Aqara",
         model="T2 RGB+CCT bulb (E27)",
     )
 
-    # Step 2: Our integration registers the same device with the same MAC
-    aal_device = device_reg.async_get_or_create(
-        config_entry_id=aal_config_entry.entry_id,
+
+def _register_our_device(
+    device_reg: dr.DeviceRegistry, entry: MockConfigEntry
+) -> dr.DeviceEntry:
+    """Register the light the way MQTTBackend does: our device, both identifiers."""
+    return device_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
         connections={(dr.CONNECTION_NETWORK_MAC, TEST_MAC)},
-        identifiers={(DOMAIN, TEST_IEEE)},
+        identifiers={OUR_IDENTIFIER, MQTT_IDENTIFIER},
     )
 
-    # Both calls should return the SAME device (merged by MAC connection)
-    assert z2m_device.id == aal_device.id, (
-        "Devices were not merged. Z2M and AAL created separate device entries "
-        "despite sharing the same MAC connection."
-    )
 
-    # Both config entries should be associated with the merged device
-    assert z2m_config_entry.entry_id in aal_device.config_entries
-    assert aal_config_entry.entry_id in aal_device.config_entries
-
-    # Our identifier should be present on the merged device
-    assert (DOMAIN, TEST_IEEE) in aal_device.identifiers
-
-    # The Z2M identifier should also still be present
-    assert ("mqtt", f"zigbee2mqtt_bridge_{TEST_IEEE}") in aal_device.identifiers
-
-
-async def test_mqtt_backend_creates_device_when_z2m_not_loaded_yet(
+async def test_our_device_is_separate_from_the_z2m_device(
     hass: HomeAssistant,
     z2m_config_entry: MockConfigEntry,
     aal_config_entry: MockConfigEntry,
 ) -> None:
-    """Test that devices merge regardless of registration order.
-
-    Our integration may load before Z2M has discovered the device. When our
-    integration registers first with a MAC connection, and Z2M registers later
-    with the same MAC, HA should still merge them into one device.
-    """
+    """Registering after Z2M creates our own device instead of joining Z2M's."""
     z2m_config_entry.add_to_hass(hass)
     aal_config_entry.add_to_hass(hass)
-
     device_reg = dr.async_get(hass)
 
-    # Step 1: Our integration loads first and registers the device
-    aal_device = device_reg.async_get_or_create(
-        config_entry_id=aal_config_entry.entry_id,
-        connections={(dr.CONNECTION_NETWORK_MAC, TEST_MAC)},
-        identifiers={(DOMAIN, TEST_IEEE)},
+    z2m_device = _register_z2m_device(device_reg, z2m_config_entry)
+    aal_device = _register_our_device(device_reg, aal_config_entry)
+
+    assert aal_device.id != z2m_device.id
+    assert aal_device.primary_config_entry == aal_config_entry.entry_id
+    assert aal_device.identifiers == {OUR_IDENTIFIER, MQTT_IDENTIFIER}
+
+    # Z2M's device is left untouched
+    z2m_device = device_reg.async_get(z2m_device.id)
+    assert z2m_device.primary_config_entry == z2m_config_entry.entry_id
+    assert z2m_device.identifiers == {MQTT_IDENTIFIER}
+
+    # Each is found by identifier under its own config entry
+    ours = device_reg.async_get_device_by_identifier(
+        OUR_IDENTIFIER, aal_config_entry.entry_id
     )
-
-    # Step 2: Z2M discovers the same physical device later
-    z2m_device = device_reg.async_get_or_create(
-        config_entry_id=z2m_config_entry.entry_id,
-        connections={(dr.CONNECTION_NETWORK_MAC, TEST_MAC)},
-        identifiers={("mqtt", f"zigbee2mqtt_bridge_{TEST_IEEE}")},
-        name="Bedroom Light",
-        manufacturer="Aqara",
-        model="T2 RGB+CCT bulb (E27)",
+    theirs = device_reg.async_get_device_by_identifier(
+        MQTT_IDENTIFIER, z2m_config_entry.entry_id
     )
+    assert ours is not None and ours.id == aal_device.id
+    assert theirs is not None and theirs.id == z2m_device.id
 
-    # Both calls should return the SAME device (merged by MAC connection)
-    assert aal_device.id == z2m_device.id, (
-        "Devices were not merged when AAL loaded before Z2M. Load order "
-        "should not prevent merging via MAC connection."
-    )
 
-    # Both config entries should be associated with the merged device
-    assert z2m_config_entry.entry_id in z2m_device.config_entries
-    assert aal_config_entry.entry_id in z2m_device.config_entries
+async def test_registration_order_does_not_change_the_outcome(
+    hass: HomeAssistant,
+    z2m_config_entry: MockConfigEntry,
+    aal_config_entry: MockConfigEntry,
+) -> None:
+    """Our device registered before Z2M's is not absorbed when Z2M registers later."""
+    z2m_config_entry.add_to_hass(hass)
+    aal_config_entry.add_to_hass(hass)
+    device_reg = dr.async_get(hass)
 
-    # Our identifier should be present on the merged device
-    assert (DOMAIN, TEST_IEEE) in z2m_device.identifiers
+    aal_device = _register_our_device(device_reg, aal_config_entry)
+    z2m_device = _register_z2m_device(device_reg, z2m_config_entry)
 
-    # The Z2M identifier should also be present
-    assert ("mqtt", f"zigbee2mqtt_bridge_{TEST_IEEE}") in z2m_device.identifiers
+    assert z2m_device.id != aal_device.id
+    assert z2m_device.primary_config_entry == z2m_config_entry.entry_id
+    assert z2m_device.identifiers == {MQTT_IDENTIFIER}
+
+    aal_device = device_reg.async_get(aal_device.id)
+    assert aal_device is not None
+    assert aal_device.primary_config_entry == aal_config_entry.entry_id
+    assert aal_device.identifiers == {OUR_IDENTIFIER, MQTT_IDENTIFIER}
