@@ -2,7 +2,7 @@
 
 All notable changes to the Aqara Advanced Lighting integration will be documented in this file.
 
-## [1.3.4] - unreleased
+## [1.3.4] - 2026/09/10
 
 ### Breaking Changes
 
@@ -2116,3 +2116,4 @@ One click HACS cutton
 [1.3.1]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.1
 [1.3.2]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.2
 [1.3.3]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.3
+[1.3.4]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.4
