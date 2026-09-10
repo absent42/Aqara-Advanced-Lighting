@@ -1,62 +1,38 @@
-# Aqara Advanced Lighting v1.3.2
+# Aqara Advanced Lighting v1.3.4
 
-A compatibility release for Home Assistant 2026.8, which changes how integrations share devices. Two bugs this caused are fixed, and the minimum supported Home Assistant version moves to 2026.6.
+Fix release to address issues created by HA breaking changes in ZHA/Zigpy.
 
 ## Upgrade Instructions
 
-**Requires Home Assistant 2026.6 or later.** If you are on an earlier version, update Home Assistant first.
+**Requires Home Assistant 2026.8 or later.** If you are on an earlier version, update Home Assistant first.
 
 1. Update via HACS to v1.3.2
 2. Restart Home Assistant
 3. Clear browser cache (Ctrl+Shift+R or Cmd+Shift+R), clear HA app cache
 
-Your configuration, presets, and favorites are preserved. Read the two notes below if you are on Home Assistant 2026.8, or if you import preset files exported before April 2026.
-
 ---
 
-### Home Assistant 2026.8: your lights now have two device pages
+### Breaking Changes
 
-Home Assistant 2026.8 restricts every device to a single integration. This integration can no longer attach itself to the Zigbee2MQTT or ZHA device for a bulb, so each Aqara light now appears as two device pages:
-
-  - the Zigbee2MQTT (or ZHA) device, holding the light entity
-  - an Aqara Advanced Lighting device, holding this integration's device triggers and conditions
-
-Home Assistant's "Linked Devices" section on each page links the two together, so you can move between them in one click.
-
-**Your existing automations keep working.** Home Assistant maps references to the old combined device onto both new ones.
-
-Two things do change, and neither can be worked around by this integration:
-
-  - **Areas** are assigned per device, so a bulb's two pages each need their own area
-  - **New device automations** must target the Aqara Advanced Lighting device to reach this integration's triggers and conditions
+  - Home Assistant 2026.8 or newer is now required, up from 2026.6. The code that merged this integration's config entry into the Zigbee2MQTT or ZHA device on older cores has been removed, along with the fallbacks for the older zigpy and zha-quirks import paths and attribute definitions. On 2026.8 and later nothing changes: since that release the integration has registered its own device beside the Zigbee2MQTT or ZHA one.
 
 ### Fixed
 
-  - **Devices were wiped and re-created on every restart under 2026.8.** This lost area assignments and custom device names each time, and broke the link Home Assistant uses to keep existing automations working. If you already upgraded to 2026.8 and lost device settings, reapply them once after installing this release and they will stick.
-  - **Device triggers and conditions stopped working for Zigbee2MQTT users on 2026.8.** The identifier they match on was dropped during Home Assistant's device migration. Automations using Aqara device triggers or conditions will work again after this update.
-  - **Device pages showed the wrong firmware version.** Devices separated by the 2026.8 migration kept a copy of the Zigbee2MQTT or ZHA firmware string that never updated. The bulb's own firmware is now reported, or left blank when it does not report one.
+  - Effects, segment patterns and segment sequences failed on the ZHA backend, logging a `KeyError` for every attribute write, whenever ZHA started after this integration: on a first installation where ZHA was added afterwards, or when ZHA's start was delayed and retried. ZHA in Home Assistant 2026.8 and later applies the most recently registered quirk for a model, and zha-quirks now ships its own quirks for the T1M and T1 Strip whose cluster does not define the Aqara effect and segment attributes, so whichever registered last decided whether effects could be written. The integration now loads the built-in zha-quirks before registering its own, so its quirk is applied regardless of the order in which ZHA and this integration start.
+  - The one-time ZHA reload that applies the integration's quirks is now decided by inspecting the devices ZHA has resolved, rather than by whether ZHA had finished loading before this integration. A device that ZHA resolved while the integration was still registering its quirks is now corrected as well, the log names the devices a reload is for, and a device that still lacks the quirk after the reload is reported in the log instead of failing silently on its first effect.
+  - The ZHA backend looked its devices up under the first ZHA config entry Home Assistant listed, which can be a dismissed ZHA discovery: an ignored or disabled entry created before the real one. Devices were then discovered but no light entity was mapped, the log showed "No HA device found for ZHA device" through six retries, and effects and patterns could not be activated while dynamic scenes still worked. Only loaded ZHA entries are consulted now, and that log line names the entries it tried.
+  - The Zigbee2MQTT backend looked the light's own device up the same way when setting the "Connected via" link, so a dismissed Mosquitto discovery left our device card without the link. Only loaded MQTT entries are consulted now.
+  - The error shown when a selected light is not a supported Aqara device told ZHA users to pick lights connected via Zigbee2MQTT. It now names both backends.
 
-### Removed: conversion of pre-April-2026 preset exports
+### Internal
 
-Two audio settings were renamed in v1.3.0, and the conversion for the old names has now been removed.
-
-Presets stored in Home Assistant were converted automatically when you first ran v1.3.0 and are **not affected**. This only matters if you import a preset JSON file that you exported before April 2026: two dynamic scene settings will silently fall back to defaults.
-
-  - Silence behaviour falls back to "slow cycle"
-  - Brightness response falls back to the linear 30-100 curve
-
-Everything else in the file imports normally. Re-save the affected scenes after importing to set those two the way you want. Files exported by v1.3.0 or later are unaffected.
-
-### Other changes
-
-  - Removed the remaining v1.3.0 preference conversions, which have had four months to run. If you have not opened the integration since April 2026, two per-user audio override settings revert to their defaults, and a favorites sort still set to "Oldest first" keeps its ordering but shows no drag handles until you switch it to "Custom".
-  - Removed the browser-storage import from February 2026, which moved colour history and sort preferences onto the server the first time you opened the panel. It ran per browser, so a browser you have not opened the panel in since then starts from defaults rather than importing what it had saved. Anything already on the server is unaffected, including in that browser.
-  - ZHA quirk registration uses the current zha-quirks import paths, silencing deprecation warnings on 2026.8.
-  - Dropped frontend compatibility code for Home Assistant releases older than 2026.6. No visible change on supported versions.
+  - The Aqara cluster attributes now declare the Aqara manufacturer code explicitly. zigpy 2.1 deprecates manufacturer-specific attributes without one and logged a warning on every lookup.
+  - The test suite no longer carries expected failures. The five tests that asserted the pre-2026.8 shared-device model were rewritten or deleted, and assertions that used `device_registry.async_get_device`, which Home Assistant deprecates for 2027.8, now look devices up per config entry.
+  - Eleven leftover `--mdc-icon-button-size` declarations, which Home Assistant stopped reading in 2026.3, were removed from the panel's icon button styles. Each sat beside the `--ha-icon-button-size` declaration that already sizes those buttons, so nothing changes visually. A frontend test now fails if a token the frontend no longer reads is reintroduced.
 
 ## Full Changelog
 
-[View full changelog](https://github.com/absent42/Aqara-Advanced-Lighting/blob/main/CHANGELOG.md#132---2026-08-05)
+[View full changelog](https://github.com/absent42/Aqara-Advanced-Lighting/blob/main/CHANGELOG.md)
 
 ## Support
 
