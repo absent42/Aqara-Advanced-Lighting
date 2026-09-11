@@ -2,7 +2,7 @@
 
 All notable changes to the Aqara Advanced Lighting integration will be documented in this file.
 
-## [Unreleased]
+## [1.3.5] - unreleased
 
 ### Changed
 
