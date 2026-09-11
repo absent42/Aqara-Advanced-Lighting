@@ -1,12 +1,12 @@
-# Aqara Advanced Lighting v1.3.4
+# Aqara Advanced Lighting v1.3.5
 
-Fix release to address issues created by HA breaking changes in ZHA/Zigpy.
+Fix release to address issues created by HA breaking changes in HA/ZHA/Zigpy.
 
 ## Upgrade Instructions
 
 **Requires Home Assistant 2026.8 or later.** If you are on an earlier version, update Home Assistant first.
 
-1. Update via HACS to v1.3.2
+1. Update via HACS to v1.3.5
 2. Restart Home Assistant
 3. Clear browser cache (Ctrl+Shift+R or Cmd+Shift+R), clear HA app cache
 
@@ -18,17 +18,11 @@ Fix release to address issues created by HA breaking changes in ZHA/Zigpy.
 
 ### Fixed
 
-  - Effects, segment patterns and segment sequences failed on the ZHA backend, logging a `KeyError` for every attribute write, whenever ZHA started after this integration: on a first installation where ZHA was added afterwards, or when ZHA's start was delayed and retried. ZHA in Home Assistant 2026.8 and later applies the most recently registered quirk for a model, and zha-quirks now ships its own quirks for the T1M and T1 Strip whose cluster does not define the Aqara effect and segment attributes, so whichever registered last decided whether effects could be written. The integration now loads the built-in zha-quirks before registering its own, so its quirk is applied regardless of the order in which ZHA and this integration start.
-  - The one-time ZHA reload that applies the integration's quirks is now decided by inspecting the devices ZHA has resolved, rather than by whether ZHA had finished loading before this integration. A device that ZHA resolved while the integration was still registering its quirks is now corrected as well, the log names the devices a reload is for, and a device that still lacks the quirk after the reload is reported in the log instead of failing silently on its first effect.
-  - The ZHA backend looked its devices up under the first ZHA config entry Home Assistant listed, which can be a dismissed ZHA discovery: an ignored or disabled entry created before the real one. Devices were then discovered but no light entity was mapped, the log showed "No HA device found for ZHA device" through six retries, and effects and patterns could not be activated while dynamic scenes still worked. Only loaded ZHA entries are consulted now, and that log line names the entries it tried.
-  - The Zigbee2MQTT backend looked the light's own device up the same way when setting the "Connected via" link, so a dismissed Mosquitto discovery left our device card without the link. Only loaded MQTT entries are consulted now.
-  - The error shown when a selected light is not a supported Aqara device told ZHA users to pick lights connected via Zigbee2MQTT. It now names both backends.
+  - `start_segment_sequence` and `start_cct_sequence` rejected every call that carried `step_N_*` fields on Home Assistant 2026.9 and later, with "not a valid value at 'step_1_segments'" or "'step_1_color_temp'" returned before the handler ran. Activating or previewing a custom segment sequence or CCT sequence, including saved presets, failed from the panel, the dashboard card, scripts and Developer Tools; built-in effects, segment patterns and dynamic scenes were unaffected. Home Assistant 2026.9 replaced voluptuous with probatio, which no longer accepts a schema entry whose validator is wrapped in `vol.Optional`. The step fields are now declared with the marker on the key, like the rest of the service schemas.
 
-### Internal
+### Changed
 
-  - The Aqara cluster attributes now declare the Aqara manufacturer code explicitly. zigpy 2.1 deprecates manufacturer-specific attributes without one and logged a warning on every lookup.
-  - The test suite no longer carries expected failures. The five tests that asserted the pre-2026.8 shared-device model were rewritten or deleted, and assertions that used `device_registry.async_get_device`, which Home Assistant deprecates for 2027.8, now look devices up per config entry.
-  - Eleven leftover `--mdc-icon-button-size` declarations, which Home Assistant stopped reading in 2026.3, were removed from the panel's icon button styles. Each sat beside the `--ha-icon-button-size` declaration that already sizes those buttons, so nothing changes visually. A frontend test now fails if a token the frontend no longer reads is reintroduced.
+  - `set_dynamic_effect` now requires `audio_entity` to be a `binary_sensor`, as `start_dynamic_scene` already did, and the effect editor's audio entity picker only offers binary sensors. The audio engine treats the entity as the beat signal and only reacts to a state of `on`, so a numeric sensor never produced beats on its own; it only appeared to work when its ESPHome device also exposed an onset binary sensor, which companion discovery found. An effect preset saved with a plain sensor entity is now rejected on activation with an error naming the field, and needs re-pointing at the device's beat binary sensor.
 
 ## Full Changelog
 

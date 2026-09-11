@@ -794,7 +794,7 @@ export class EffectEditor extends ReorderableStepsMixin(LitElement) {
                   .hass=${this.hass}
                   .selector=${{
                     entity: {
-                      domain: ['binary_sensor', 'sensor'],
+                      domain: 'binary_sensor',
                     },
                   }}
                   .value=${this._audioEntity}

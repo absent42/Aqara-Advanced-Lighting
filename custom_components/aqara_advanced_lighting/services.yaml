@@ -154,13 +154,14 @@ set_dynamic_effect:
         boolean:
     audio_entity:
       name: Audio entity
-      description: ESPHome audio sensor entity for audio-reactive modulation. Only supported on T1M and T1 Strip devices.
+      description: >-
+        Binary sensor providing beat detection data (from esphome-audio-reactive
+        component). The integration auto-discovers companion sensors on the same
+        ESPHome device. Only supported on T1M and T1 Strip devices.
       required: false
       selector:
         entity:
-          domain:
-            - binary_sensor
-            - sensor
+          domain: binary_sensor
     audio_sensitivity:
       name: Audio sensitivity
       description: Beat detection sensitivity on the ESP32 device (1-100).

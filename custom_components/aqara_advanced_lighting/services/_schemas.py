@@ -174,7 +174,7 @@ SERVICE_SET_DYNAMIC_EFFECT_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SYNC, default=True): cv.boolean,
         vol.Optional(ATTR_Z2M_BASE_TOPIC): cv.string,
         # Audio-reactive effect modulation
-        vol.Optional(ATTR_AUDIO_ENTITY): cv.entity_id,
+        vol.Optional(ATTR_AUDIO_ENTITY): cv.entity_domain("binary_sensor"),
         vol.Optional(ATTR_AUDIO_SENSITIVITY): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=100)
         ),
@@ -266,26 +266,20 @@ SERVICE_CREATE_BLOCKS_SCHEMA = vol.Schema(
 
 def _add_cct_step_fields(schema_dict: dict, step_num: int) -> None:
     """Add CCT sequence step fields to a schema dict."""
-    schema_dict[f"step_{step_num}_color_temp"] = vol.Optional(
-        vol.All(
-            vol.Coerce(int),
-            vol.Range(min=MIN_COLOR_TEMP_KELVIN, max=MAX_COLOR_TEMP_KELVIN),
-        )
+    schema_dict[vol.Optional(f"step_{step_num}_color_temp")] = vol.All(
+        vol.Coerce(int),
+        vol.Range(min=MIN_COLOR_TEMP_KELVIN, max=MAX_COLOR_TEMP_KELVIN),
     )
-    schema_dict[f"step_{step_num}_brightness"] = vol.Optional(
-        vol.All(
-            vol.Coerce(int),
-            vol.Range(min=MIN_BRIGHTNESS_PERCENT, max=MAX_BRIGHTNESS_PERCENT),
-        )
+    schema_dict[vol.Optional(f"step_{step_num}_brightness")] = vol.All(
+        vol.Coerce(int),
+        vol.Range(min=MIN_BRIGHTNESS_PERCENT, max=MAX_BRIGHTNESS_PERCENT),
     )
-    schema_dict[f"step_{step_num}_transition"] = vol.Optional(
-        vol.All(
-            vol.Coerce(float),
-            vol.Range(min=MIN_TRANSITION_TIME, max=MAX_TRANSITION_TIME),
-        )
+    schema_dict[vol.Optional(f"step_{step_num}_transition")] = vol.All(
+        vol.Coerce(float),
+        vol.Range(min=MIN_TRANSITION_TIME, max=MAX_TRANSITION_TIME),
     )
-    schema_dict[f"step_{step_num}_hold"] = vol.Optional(
-        vol.All(vol.Coerce(float), vol.Range(min=MIN_HOLD_TIME, max=MAX_HOLD_TIME))
+    schema_dict[vol.Optional(f"step_{step_num}_hold")] = vol.All(
+        vol.Coerce(float), vol.Range(min=MIN_HOLD_TIME, max=MAX_HOLD_TIME)
     )
 
 # Activation patterns used in segment sequence step schemas
@@ -302,39 +296,35 @@ _ACTIVATION_PATTERN_VALUES = [
 
 def _add_segment_step_fields(schema_dict: dict, step_num: int) -> None:
     """Add segment sequence step fields to a schema dict."""
-    schema_dict[f"step_{step_num}_segments"] = vol.Optional(cv.string)
-    schema_dict[f"step_{step_num}_mode"] = vol.Optional(
-        vol.In(
-            [
-                SEGMENT_MODE_BLOCKS_REPEAT,
-                SEGMENT_MODE_BLOCKS_EXPAND,
-                SEGMENT_MODE_GRADIENT,
-            ]
-        )
+    schema_dict[vol.Optional(f"step_{step_num}_segments")] = cv.string
+    schema_dict[vol.Optional(f"step_{step_num}_mode")] = vol.In(
+        [
+            SEGMENT_MODE_BLOCKS_REPEAT,
+            SEGMENT_MODE_BLOCKS_EXPAND,
+            SEGMENT_MODE_GRADIENT,
+        ]
     )
     for color_num in range(1, 7):
-        schema_dict[f"step_{step_num}_color_{color_num}"] = vol.Optional(COLOR_SCHEMA)
-    schema_dict[f"step_{step_num}_segment_colors"] = vol.Optional(
-        vol.All(
-            cv.ensure_list,
-            [
-                vol.Schema(
-                    {
-                        vol.Required("segment"): vol.Coerce(int),
-                        vol.Required("color"): RGB_COLOR_SCHEMA,
-                    }
-                )
-            ],
-        )
+        schema_dict[vol.Optional(f"step_{step_num}_color_{color_num}")] = COLOR_SCHEMA
+    schema_dict[vol.Optional(f"step_{step_num}_segment_colors")] = vol.All(
+        cv.ensure_list,
+        [
+            vol.Schema(
+                {
+                    vol.Required("segment"): vol.Coerce(int),
+                    vol.Required("color"): RGB_COLOR_SCHEMA,
+                }
+            )
+        ],
     )
-    schema_dict[f"step_{step_num}_duration"] = vol.Optional(
-        vol.All(vol.Coerce(float), vol.Range(min=MIN_DURATION, max=MAX_DURATION))
+    schema_dict[vol.Optional(f"step_{step_num}_duration")] = vol.All(
+        vol.Coerce(float), vol.Range(min=MIN_DURATION, max=MAX_DURATION)
     )
-    schema_dict[f"step_{step_num}_hold"] = vol.Optional(
-        vol.All(vol.Coerce(float), vol.Range(min=MIN_HOLD_TIME, max=MAX_HOLD_TIME))
+    schema_dict[vol.Optional(f"step_{step_num}_hold")] = vol.All(
+        vol.Coerce(float), vol.Range(min=MIN_HOLD_TIME, max=MAX_HOLD_TIME)
     )
-    schema_dict[f"step_{step_num}_activation_pattern"] = vol.Optional(
-        vol.In(_ACTIVATION_PATTERN_VALUES)
+    schema_dict[vol.Optional(f"step_{step_num}_activation_pattern")] = vol.In(
+        _ACTIVATION_PATTERN_VALUES
     )
 
 # Build CCT sequence service schema with individual step fields

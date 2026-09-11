@@ -39,6 +39,7 @@ tests/
 ├── test_schedule_cct.py                   # Schedule mode CCT sequences (clock/sunrise/sunset)
 ├── test_segment_sequence_brightness.py    # Brightness override for start_segment_sequence (T1M and T1 Strip)
 ├── test_segment_utils.py                  # Segment parsing and color generation
+├── test_service_schemas.py                # Step field validation for start_segment_sequence and start_cct_sequence
 ├── test_solar_cct.py                      # Solar mode CCT sequences (elevation-based)
 ├── test_sun_utils.py                      # Solar elevation interpolation
 ├── test_zha_backend.py                    # ZHABackend stale device removal
