@@ -174,7 +174,7 @@ SERVICE_SET_DYNAMIC_EFFECT_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SYNC, default=True): cv.boolean,
         vol.Optional(ATTR_Z2M_BASE_TOPIC): cv.string,
         # Audio-reactive effect modulation
-        vol.Optional(ATTR_AUDIO_ENTITY): cv.entity_id,
+        vol.Optional(ATTR_AUDIO_ENTITY): cv.entity_domain("binary_sensor"),
         vol.Optional(ATTR_AUDIO_SENSITIVITY): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=100)
         ),

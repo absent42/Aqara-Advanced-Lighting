@@ -5672,7 +5672,7 @@
                 <span class="form-label">${this._localize("effect_editor.audio_entity_label")||"Audio sensor entity"}</span>
                 <ha-selector
                   .hass=${this.hass}
-                  .selector=${{entity:{domain:["binary_sensor","sensor"]}}}
+                  .selector=${{entity:{domain:"binary_sensor"}}}
                   .value=${this._audioEntity}
                   @value-changed=${this._handleAudioEntityChange}
                 ></ha-selector>

@@ -9,7 +9,9 @@ import pytest
 import voluptuous as vol
 
 from custom_components.aqara_advanced_lighting.services._schemas import (
+    SERVICE_SET_DYNAMIC_EFFECT_SCHEMA,
     SERVICE_START_CCT_SEQUENCE_SCHEMA,
+    SERVICE_START_DYNAMIC_SCENE_SCHEMA,
     SERVICE_START_SEGMENT_SEQUENCE_SCHEMA,
 )
 
@@ -79,3 +81,23 @@ def test_no_marker_used_as_validator(schema):
         if isinstance(validator, vol.Marker)
     ]
     assert offenders == []
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [SERVICE_SET_DYNAMIC_EFFECT_SCHEMA, SERVICE_START_DYNAMIC_SCENE_SCHEMA],
+    ids=["dynamic_effect", "dynamic_scene"],
+)
+class TestAudioEntityDomain:
+    """The audio entity is the beat binary sensor for both audio consumers."""
+
+    def test_accepts_binary_sensor(self, schema):
+        result = schema(
+            {"entity_id": "light.zz_probe", "audio_entity": "binary_sensor.beat"}
+        )
+        assert result["audio_entity"] == "binary_sensor.beat"
+
+    def test_rejects_other_domain(self, schema):
+        with pytest.raises(vol.Invalid) as excinfo:
+            schema({"entity_id": "light.zz_probe", "audio_entity": "sensor.level"})
+        assert excinfo.value.path == ["audio_entity"]
