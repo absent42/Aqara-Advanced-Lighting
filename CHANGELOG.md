@@ -2,6 +2,12 @@
 
 All notable changes to the Aqara Advanced Lighting integration will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+  - `start_segment_sequence` and `start_cct_sequence` rejected every call that carried `step_N_*` fields on Home Assistant 2026.9 and later, with "not a valid value at 'step_1_segments'" or "'step_1_color_temp'" returned before the handler ran. Activating or previewing a custom segment sequence or CCT sequence, including saved presets, failed from the panel, the dashboard card, scripts and Developer Tools; built-in effects, segment patterns and dynamic scenes were unaffected. Home Assistant 2026.9 replaced voluptuous with probatio, which no longer accepts a schema entry whose validator is wrapped in `vol.Optional`. The step fields are now declared with the marker on the key, like the rest of the service schemas.
+
 ## [1.3.4] - 2026/09/10
 
 ### Breaking Changes
