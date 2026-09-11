@@ -2,15 +2,15 @@
 
 All notable changes to the Aqara Advanced Lighting integration will be documented in this file.
 
-## [1.3.5] - unreleased
-
-### Changed
-
-  - `set_dynamic_effect` now requires `audio_entity` to be a `binary_sensor`, as `start_dynamic_scene` already did, and the effect editor's audio entity picker only offers binary sensors. The audio engine treats the entity as the beat signal and only reacts to a state of `on`, so a numeric sensor never produced beats on its own; it only appeared to work when its ESPHome device also exposed an onset binary sensor, which companion discovery found. An effect preset saved with a plain sensor entity is now rejected on activation with an error naming the field, and needs re-pointing at the device's beat binary sensor.
+## [1.3.5] - 2026/09/11
 
 ### Fixed
 
   - `start_segment_sequence` and `start_cct_sequence` rejected every call that carried `step_N_*` fields on Home Assistant 2026.9 and later, with "not a valid value at 'step_1_segments'" or "'step_1_color_temp'" returned before the handler ran. Activating or previewing a custom segment sequence or CCT sequence, including saved presets, failed from the panel, the dashboard card, scripts and Developer Tools; built-in effects, segment patterns and dynamic scenes were unaffected. Home Assistant 2026.9 replaced voluptuous with probatio, which no longer accepts a schema entry whose validator is wrapped in `vol.Optional`. The step fields are now declared with the marker on the key, like the rest of the service schemas.
+
+### Changed
+
+  - `set_dynamic_effect` now requires `audio_entity` to be a `binary_sensor`, as `start_dynamic_scene` already did, and the effect editor's audio entity picker only offers binary sensors. The audio engine treats the entity as the beat signal and only reacts to a state of `on`, so a numeric sensor never produced beats on its own; it only appeared to work when its ESPHome device also exposed an onset binary sensor, which companion discovery found. An effect preset saved with a plain sensor entity is now rejected on activation with an error naming the field, and needs re-pointing at the device's beat binary sensor.
 
 ## [1.3.4] - 2026/09/10
 
@@ -2127,3 +2127,4 @@ One click HACS cutton
 [1.3.2]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.2
 [1.3.3]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.3
 [1.3.4]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.4
+[1.3.5]: https://github.com/absent42/Aqara-Advanced-Lighting/releases/tag/v1.3.5
