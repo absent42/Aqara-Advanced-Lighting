@@ -324,6 +324,7 @@ def register_quirks() -> None:
                 _add_common_number_attrs(
                     QuirkBuilder(manufacturer, model)
                     .replaces(AqaraLumiCluster)
+                    .replaces(AqaraLumiCluster, endpoint_id=2)
                     .enum(
                         "power_on_behavior",
                         PowerOnBehaviorT1,
