@@ -88,12 +88,12 @@ async def test_our_device_is_separate_from_the_z2m_device(
     aal_device = _register_our_device(device_reg, aal_config_entry)
 
     assert aal_device.id != z2m_device.id
-    assert aal_device.primary_config_entry == aal_config_entry.entry_id
+    assert aal_device.config_entry_id == aal_config_entry.entry_id
     assert aal_device.identifiers == {OUR_IDENTIFIER, MQTT_IDENTIFIER}
 
     # Z2M's device is left untouched
     z2m_device = device_reg.async_get(z2m_device.id)
-    assert z2m_device.primary_config_entry == z2m_config_entry.entry_id
+    assert z2m_device.config_entry_id == z2m_config_entry.entry_id
     assert z2m_device.identifiers == {MQTT_IDENTIFIER}
 
     # Each is found by identifier under its own config entry
@@ -121,10 +121,10 @@ async def test_registration_order_does_not_change_the_outcome(
     z2m_device = _register_z2m_device(device_reg, z2m_config_entry)
 
     assert z2m_device.id != aal_device.id
-    assert z2m_device.primary_config_entry == z2m_config_entry.entry_id
+    assert z2m_device.config_entry_id == z2m_config_entry.entry_id
     assert z2m_device.identifiers == {MQTT_IDENTIFIER}
 
     aal_device = device_reg.async_get(aal_device.id)
     assert aal_device is not None
-    assert aal_device.primary_config_entry == aal_config_entry.entry_id
+    assert aal_device.config_entry_id == aal_config_entry.entry_id
     assert aal_device.identifiers == {OUR_IDENTIFIER, MQTT_IDENTIFIER}

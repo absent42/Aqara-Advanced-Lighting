@@ -251,7 +251,7 @@ async def test_non_stale_zha_devices_unchanged(
     assert still_there is not None, (
         "device_a should remain registered when present in ZHA gateway"
     )
-    assert still_there.primary_config_entry == mock_config_entry_zha.entry_id, (
+    assert still_there.config_entry_id == mock_config_entry_zha.entry_id, (
         "our config entry should still be on device_a"
     )
 
