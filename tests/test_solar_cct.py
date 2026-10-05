@@ -1,5 +1,7 @@
 """Tests for solar CCT sequence mode."""
 
+import pytest
+
 from custom_components.aqara_advanced_lighting.models import (
     CCTSequence,
     CCTSequenceStep,
@@ -79,3 +81,13 @@ def test_standard_mode_validates_normally() -> None:
     except ValueError:
         raised = True
     assert raised, "Should have raised ValueError for empty steps"
+
+
+def test_cct_step_accepts_2000() -> None:
+    step = CCTSequenceStep(color_temp=2000, brightness=100, transition=0, hold=0)
+    assert step.color_temp == 2000
+
+
+def test_cct_step_rejects_1999() -> None:
+    with pytest.raises(ValueError, match="2000-6500K"):
+        CCTSequenceStep(color_temp=1999, brightness=100, transition=0, hold=0)

@@ -574,12 +574,12 @@ start_cct_sequence:
       fields:
         step_1_color_temp:
           name: "Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: true
           default: 2700
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"
@@ -625,11 +625,11 @@ start_cct_sequence:
       fields:
         step_2_color_temp:
           name: "Step 2: Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: false
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"
@@ -668,11 +668,11 @@ start_cct_sequence:
               mode: box
         step_3_color_temp:
           name: "Step 3: Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: false
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"
@@ -711,11 +711,11 @@ start_cct_sequence:
               mode: box
         step_4_color_temp:
           name: "Step 4: Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: false
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"
@@ -754,11 +754,11 @@ start_cct_sequence:
               mode: box
         step_5_color_temp:
           name: "Step 5: Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: false
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"
@@ -801,11 +801,11 @@ start_cct_sequence:
       fields:
         step_6_color_temp:
           name: "Step 6: Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: false
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"
@@ -844,11 +844,11 @@ start_cct_sequence:
               mode: box
         step_7_color_temp:
           name: "Step 7: Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: false
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"
@@ -887,11 +887,11 @@ start_cct_sequence:
               mode: box
         step_8_color_temp:
           name: "Step 8: Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: false
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"
@@ -930,11 +930,11 @@ start_cct_sequence:
               mode: box
         step_9_color_temp:
           name: "Step 9: Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: false
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"
@@ -973,11 +973,11 @@ start_cct_sequence:
               mode: box
         step_10_color_temp:
           name: "Step 10: Color temperature"
-          description: Color temperature in kelvin (2700-6500K).
+          description: Color temperature in kelvin (2000-6500K). Lights with a narrower range are limited to their own range.
           required: false
           selector:
             number:
-              min: 2700
+              min: 2000
               max: 6500
               step: 100
               unit_of_measurement: "K"

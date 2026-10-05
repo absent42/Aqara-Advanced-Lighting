@@ -11,6 +11,7 @@ from typing import Any
 from homeassistant.const import EVENT_STATE_CHANGED, STATE_OFF, STATE_ON
 from homeassistant.core import Context, Event, HomeAssistant, callback
 
+from .capability_profile import clamp_color_temp_to_state
 from .const import INTEGRATION_CONTEXT_PARENT_ID
 from .sun_utils import SolarStep, get_sun_state, interpolate_solar_values
 
@@ -112,6 +113,9 @@ class CircadianManager:
                 ct, br = interpolate_solar_values(
                     entry.solar_steps, sun_state
                 )
+                ct = clamp_color_temp_to_state(
+                    self._hass.states.get(entity_id), ct
+                )
             result.append({
                 "entity_id": entity_id,
                 "preset_name": entry.preset_name,
@@ -139,6 +143,7 @@ class CircadianManager:
             return
 
         ct, br = interpolate_solar_values(entry.solar_steps, sun_state)
+        ct = clamp_color_temp_to_state(self._hass.states.get(entity_id), ct)
 
         context = Context(parent_id=INTEGRATION_CONTEXT_PARENT_ID)
         await self._hass.services.async_call(

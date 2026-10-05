@@ -3,6 +3,8 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { HomeAssistant, CCTSequenceStep, ScheduleStep, UserCCTSequencePreset, DeviceContext, CCTEditorDraft, Translations } from './types';
 import { ReorderableStepsMixin, reorderableStepStyles } from './reorderable-steps-mixin';
 import { editorFormStyles, localize, loopModeOptions, endBehaviorOptions, renderInput } from './editor-constants';
+import { CCT_MIN_KELVIN, CCT_MAX_KELVIN, findClampedLights } from './cct-range';
+import { getEntityFriendlyName } from './entity-utils';
 
 interface EditableStep extends CCTSequenceStep {
   id: string;
@@ -556,6 +558,26 @@ export class CCTSequenceEditor extends ReorderableStepsMixin(LitElement) {
     return false;
   }
 
+  private _activeColorTemps(): number[] {
+    if (this._mode === 'solar') return this._solarSteps.map((s) => s.color_temp);
+    if (this._mode === 'schedule') return this._scheduleSteps.map((s) => s.color_temp);
+    return this._steps.map((s) => s.color_temp);
+  }
+
+  private _renderClampNotice() {
+    if (!this.hass || this._hasIncompatibleEndpoints()) return '';
+    const clamped = findClampedLights(this.hass.states, this.selectedEntities, this._activeColorTemps());
+    if (!clamped.length) return '';
+    const lights = clamped
+      .map((c) => `${getEntityFriendlyName(this.hass, c.entityId)} (${c.min}-${c.max}K)`)
+      .join(', ');
+    return html`
+      <ha-alert alert-type="info">
+        ${this._localize('editors.cct_range_clamped', { lights })}
+      </ha-alert>
+    `;
+  }
+
   private _handleStepFieldChange(stepId: string, field: keyof CCTSequenceStep, e: CustomEvent): void {
     this._steps = this._steps.map((step) =>
       step.id === stepId ? { ...step, [field]: e.detail.value } : step
@@ -924,15 +946,15 @@ export class CCTSequenceEditor extends ReorderableStepsMixin(LitElement) {
   }
 
   /**
-   * Map a color temperature (2700-6500K) to a CSS color for timeline display.
+   * Map a color temperature to a CSS color for timeline display.
    * Warm temps get amber hues, cool temps get near-white with a slight cool tint.
    */
   private _colorTempToCSS(kelvin: number): string {
-    const t = Math.max(0, Math.min(1, (kelvin - 2700) / (6500 - 2700)));
-    // Warm amber (2700K: 255,147,41) -> near-white with slight cool tint (6500K: 235,240,255)
+    const t = Math.max(0, Math.min(1, (kelvin - CCT_MIN_KELVIN) / (CCT_MAX_KELVIN - CCT_MIN_KELVIN)));
+    // Deep amber (2000K: 255,137,14) -> near-white with slight cool tint (6500K: 235,240,255)
     const r = Math.round(255 - t * 20);
-    const g = Math.round(147 + t * 93);
-    const b = Math.round(41 + t * 214);
+    const g = Math.round(137 + t * 103);
+    const b = Math.round(14 + t * 241);
     return `rgb(${r}, ${g}, ${b})`;
   }
 
@@ -1271,8 +1293,8 @@ export class CCTSequenceEditor extends ReorderableStepsMixin(LitElement) {
               .selector=${{
                 color_temp: {
                   unit: 'kelvin',
-                  min: 2700,
-                  max: 6500,
+                  min: CCT_MIN_KELVIN,
+                  max: CCT_MAX_KELVIN,
                 },
               }}
               .value=${step.color_temp}
@@ -1382,8 +1404,8 @@ export class CCTSequenceEditor extends ReorderableStepsMixin(LitElement) {
               .selector=${{
                 color_temp: {
                   unit: 'kelvin',
-                  min: 2700,
-                  max: 6500,
+                  min: CCT_MIN_KELVIN,
+                  max: CCT_MAX_KELVIN,
                 },
               }}
               .value=${step.color_temp}
@@ -1457,8 +1479,8 @@ export class CCTSequenceEditor extends ReorderableStepsMixin(LitElement) {
               .selector=${{
                 color_temp: {
                   unit: 'kelvin',
-                  min: 2700,
-                  max: 6500,
+                  min: CCT_MIN_KELVIN,
+                  max: CCT_MAX_KELVIN,
                 },
               }}
               .value=${step.color_temp}
@@ -1759,6 +1781,7 @@ export class CCTSequenceEditor extends ReorderableStepsMixin(LitElement) {
               </div>
             `
           : ''}
+        ${this._renderClampNotice()}
 
         ${!this.hasSelectedEntities
           ? html`

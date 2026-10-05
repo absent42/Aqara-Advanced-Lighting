@@ -142,7 +142,7 @@ Audio-reactive effects are not available for T2 bulbs. See [Audio-reactive light
 Step-by-step mode with manual timing control:
 
 - Build multi-step sequences (up to 20 steps)
-- Set color temperature (2700-6500K) and brightness (1-100%) per step
+- Set color temperature (2000-6500K) and brightness (1-100%) per step. Each light is limited to the color temperature range it reports; values outside it are clamped, and the editor names any selected light this applies to
 - Reorder steps with drag-and-drop, or use the step controls to move, duplicate, and delete steps
 - Each step has two timing phases:
   - **Transition time**: How long the light takes to fade from its current state to this step's color temperature and brightness (0-3600 seconds). The light smoothly interpolates between values during this period
@@ -158,7 +158,7 @@ Automatically adjust color temperature and brightness based on the time of day. 
 
 - Add 2-20 schedule steps, each with:
   - **Time**: A fixed time (e.g., `12:00`) or a sun-relative offset (e.g., `sunrise+30`, `sunset-60`). Sun-relative times are resolved dynamically using your Home Assistant location, so the schedule adapts to seasonal changes automatically
-  - **Color temperature**: Target color temperature (2700-6500K)
+  - **Color temperature**: Target color temperature (2000-6500K). Each light is limited to the color temperature range it reports; values outside it are clamped
   - **Brightness**: Target brightness (1-100%)
   - **Label** (optional): A friendly name for the step (e.g., "Morning", "Midday", "Evening") shown in the active presets display
 - The integration reads the current sun elevation from Home Assistant's `sun.sun` entity and adapts the sunrise and sunset timnes throughout the year
@@ -184,7 +184,7 @@ Automatically adjust color temperature and brightness based on the sun's elevati
     - **Rising**: Only when the sun is ascending (morning)
     - **Setting**: Only when the sun is descending (evening)
     - **Any**: Applies in both directions
-  - **Color temperature**: Target color temperature (2700-6500K)
+  - **Color temperature**: Target color temperature (2000-6500K). Each light is limited to the color temperature range it reports; values outside it are clamped
   - **Brightness**: Target brightness (1-100%)
 - The integration reads the current sun elevation from Home Assistant's `sun.sun` entity and interpolates between the two nearest steps
 - Using separate rising and setting phases lets you define different lighting for morning vs. evening at the same sun elevation (e.g., brighter in the morning, dimmer in the evening)

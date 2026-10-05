@@ -9,10 +9,12 @@ import pytest
 import voluptuous as vol
 
 from custom_components.aqara_advanced_lighting.services._schemas import (
+    SCHEDULE_STEP_SCHEMA,
     SERVICE_SET_DYNAMIC_EFFECT_SCHEMA,
     SERVICE_START_CCT_SEQUENCE_SCHEMA,
     SERVICE_START_DYNAMIC_SCENE_SCHEMA,
     SERVICE_START_SEGMENT_SEQUENCE_SCHEMA,
+    SOLAR_STEP_SCHEMA,
 )
 
 SEGMENT_CALL = {
@@ -101,3 +103,35 @@ class TestAudioEntityDomain:
         with pytest.raises(vol.Invalid) as excinfo:
             schema({"entity_id": "light.zz_probe", "audio_entity": "sensor.level"})
         assert excinfo.value.path == ["audio_entity"]
+
+
+class TestCCTColorTempRange:
+    def test_step_accepts_2000(self):
+        result = SERVICE_START_CCT_SEQUENCE_SCHEMA(
+            {**CCT_CALL, "step_1_color_temp": 2000}
+        )
+        assert result["step_1_color_temp"] == 2000
+
+    def test_step_rejects_1999(self):
+        with pytest.raises(vol.Invalid):
+            SERVICE_START_CCT_SEQUENCE_SCHEMA(
+                {**CCT_CALL, "step_1_color_temp": 1999}
+            )
+
+    def test_step_rejects_6501(self):
+        with pytest.raises(vol.Invalid):
+            SERVICE_START_CCT_SEQUENCE_SCHEMA(
+                {**CCT_CALL, "step_1_color_temp": 6501}
+            )
+
+    def test_solar_step_accepts_2000(self):
+        result = SOLAR_STEP_SCHEMA(
+            {"sun_elevation": 0, "color_temp": 2000, "brightness": 50}
+        )
+        assert result["color_temp"] == 2000
+
+    def test_schedule_step_accepts_2000(self):
+        result = SCHEDULE_STEP_SCHEMA(
+            {"time": "sunset", "color_temp": 2000, "brightness": 50}
+        )
+        assert result["color_temp"] == 2000

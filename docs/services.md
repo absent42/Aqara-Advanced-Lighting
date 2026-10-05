@@ -372,22 +372,23 @@ data:
 - `entity_id` (required): Light entity or group to control. Works with any CCT-capable light, not just Aqara devices
 - `preset` (optional): Use a built-in preset ("goodnight", "wakeup", "mindful_breathing", "power_nap", "circadian", "solar_warm", "solar_productive") -- dropdown selector with 7 built-in presets. You can also type the name of a custom CCT sequence preset you created in the frontend panel (case-insensitive). When preset is selected, manual step/loop/end_behavior parameters are ignored
 - `turn_on` (optional): Turn light on before starting sequence (default: false)
+- Each light is limited to the color temperature range it reports; values outside it are clamped.
 - `mode` (optional): Sequence execution mode (default: "standard")
   - `"standard"`: Timed step-by-step sequence with transition and hold timing
   - `"schedule"`: Adapts color temperature based on the time of day, interpolating between time-based steps on a 24-hour cycle
   - `"solar"`: Adapts color temperature based on the sun's elevation angle, polling every 60 seconds
 - `schedule_steps` (optional, required for schedule mode): List of time-of-day steps. Each step is an object with:
   - `time` (required): A fixed time (e.g., `"12:00"`) or a sun-relative offset (e.g., `"sunrise+30"`, `"sunset-60"`)
-  - `color_temp` (required): Color temperature in kelvin (2700-6500)
+  - `color_temp` (required): Color temperature in kelvin (2000-6500)
   - `brightness` (required): Brightness level (1-255)
   - `label` (optional): Friendly name for the step (e.g., "Morning", "Midday")
 - `solar_steps` (optional, required for solar mode): List of solar elevation steps. Each step is an object with:
   - `sun_elevation` (required): Sun angle in degrees (-90 to 90)
-  - `color_temp` (required): Color temperature in kelvin (1000-10000)
+  - `color_temp` (required): Color temperature in kelvin (2000-6500)
   - `brightness` (required): Brightness level (1-255)
   - `phase` (optional): When the step applies -- `"rising"` (sun ascending), `"setting"` (sun descending), or `"any"` (both). Default: `"any"`
 - **Step 1 fields** (required for standard mode if not using preset):
-  - `step_1_color_temp`: Color temperature in kelvin (2700-6500)
+  - `step_1_color_temp`: Color temperature in kelvin (2000-6500)
   - `step_1_brightness`: Brightness level (1-255)
   - `step_1_transition`: Time in seconds to transition to this step (0-3600)
   - `step_1_hold`: Time to hold at this step after transition completes (0-3600)

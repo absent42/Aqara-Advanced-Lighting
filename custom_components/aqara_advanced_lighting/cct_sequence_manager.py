@@ -8,6 +8,7 @@ from typing import Any, override
 from homeassistant.helpers.storage import Store
 
 from .base_sequence_manager import BaseSequenceManager
+from .capability_profile import clamp_color_temp_to_state
 from .const import (
     DATA_ENTITY_CONTROLLER,
     DOMAIN,
@@ -108,21 +109,28 @@ class CCTSequenceManager(BaseSequenceManager[CCTSequence]):
                 )
                 for s in seq_data["schedule_steps"]
             ]
-            return interpolate_schedule_values(schedule_steps, sun_state)
-
-        solar_steps = [
-            SolarStep(
-                sun_elevation=s["sun_elevation"],
-                color_temp=s["color_temp"],
-                brightness=s["brightness"],
-                phase=s.get("phase", "any"),
-            )
-            for s in seq_data["solar_steps"]
-        ]
-        return interpolate_solar_values(solar_steps, sun_state)
+            ct, br = interpolate_schedule_values(schedule_steps, sun_state)
+        else:
+            solar_steps = [
+                SolarStep(
+                    sun_elevation=s["sun_elevation"],
+                    color_temp=s["color_temp"],
+                    brightness=s["brightness"],
+                    phase=s.get("phase", "any"),
+                )
+                for s in seq_data["solar_steps"]
+            ]
+            ct, br = interpolate_solar_values(solar_steps, sun_state)
+        return self._clamp_to_light(entity_id, ct), br
 
     # Keep alias for backward compatibility
     get_current_solar_values = get_current_adaptive_values
+
+    def _clamp_to_light(self, entity_id: str, color_temp: int) -> int:
+        """Clamp a color temperature to the entity's reported range."""
+        return clamp_color_temp_to_state(
+            self.hass.states.get(entity_id), color_temp
+        )
 
     def get_auto_resume_delay(self, entity_id: str) -> float:
         """Get the auto-resume delay for a running solar sequence.
@@ -584,20 +592,23 @@ class CCTSequenceManager(BaseSequenceManager[CCTSequence]):
         return state is not None and state.state == "on"
 
     def _calc_adaptive_target(
-        self, sequence: CCTSequence,
+        self, entity_id: str, sequence: CCTSequence,
     ) -> tuple[int, int] | None:
         """Calculate target color temp and brightness for the current moment.
 
         Returns (color_temp, brightness) or None if sun state is unavailable.
         Dispatches to the correct interpolation strategy based on sequence mode.
+        Color temp is clamped to the entity's reported range.
         """
         sun_state = get_sun_state(self.hass)
         if sun_state is None:
             return None
 
         if sequence.mode == "schedule":
-            return interpolate_schedule_values(sequence.schedule_steps, sun_state)
-        return interpolate_solar_values(sequence.solar_steps, sun_state)
+            ct, br = interpolate_schedule_values(sequence.schedule_steps, sun_state)
+        else:
+            ct, br = interpolate_solar_values(sequence.solar_steps, sun_state)
+        return self._clamp_to_light(entity_id, ct), br
 
     async def _run_adaptive_loop(
         self,
@@ -651,7 +662,7 @@ class CCTSequenceManager(BaseSequenceManager[CCTSequence]):
                     last_ct = None
                     last_br = None
 
-                result = self._calc_adaptive_target(sequence)
+                result = self._calc_adaptive_target(entity_id, sequence)
                 if result is None:
                     _LOGGER.debug(
                         "Sun entity not available, retrying in %ss",

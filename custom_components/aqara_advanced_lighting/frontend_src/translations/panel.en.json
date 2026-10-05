@@ -365,6 +365,7 @@
     "tooltip_fix_gradient_errors": "Fix gradient validation errors first",
     "turn_off_unspecified_label": "Turn off unspecified segments",
     "incompatible_cct_endpoints": "One or more selected lights do not support color temperature control. CCT sequences require lights with color_temp capability. For T1M devices, select the white/CCT endpoint instead of the RGB ring endpoint.",
+    "cct_range_clamped": "Some selected lights cannot reach every color temperature in this sequence. Values outside a light's range are limited to that range: {lights}",
     "mode_label": "Mode",
     "mode_standard": "Standard",
     "mode_schedule": "Schedule",
