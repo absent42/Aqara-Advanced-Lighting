@@ -165,7 +165,11 @@ PROJECTION_DARK_THRESHOLD: Final = 0.12
 MIN_BRIGHTNESS_PERCENT: Final = 1  # Minimum percentage for UI
 MAX_BRIGHTNESS_PERCENT: Final = 100  # Maximum percentage for UI
 
-# CCT sequence constraints
+# CCT sequence input range; each light is clamped to its own reported range
+CCT_SEQUENCE_MIN_KELVIN: Final = 2000
+CCT_SEQUENCE_MAX_KELVIN: Final = 6500
+
+# Fallback range for lights that do not report min/max color temp
 MIN_COLOR_TEMP_KELVIN: Final = 2700
 MAX_COLOR_TEMP_KELVIN: Final = 6500
 MIN_TRANSITION_TIME: Final = 0.0

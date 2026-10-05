@@ -9,6 +9,7 @@ from custom_components.aqara_advanced_lighting.capability_profile import (
     build_capability_profile,
     adapt_xy_for_cct_light,
     clamp_color_temp,
+    clamp_color_temp_to_state,
 )
 
 
@@ -132,3 +133,33 @@ def test_missing_color_modes_defaults_on_off():
     state.attributes = {}
     profile = build_capability_profile(state)
     assert profile.level == LightCapabilityLevel.ON_OFF_ONLY
+
+
+def test_clamp_to_state_below_min():
+    """Value below the light's minimum is raised to the minimum."""
+    state = _make_state({"color_temp"}, min_kelvin=2700, max_kelvin=6500)
+    assert clamp_color_temp_to_state(state, 2000) == 2700
+
+
+def test_clamp_to_state_above_max():
+    """Value above the light's maximum is lowered to the maximum."""
+    state = _make_state({"color_temp"}, min_kelvin=2200, max_kelvin=5000)
+    assert clamp_color_temp_to_state(state, 6500) == 5000
+
+
+def test_clamp_to_state_within_range():
+    """Value inside a wide range passes through."""
+    state = _make_state({"color_temp"}, min_kelvin=2000, max_kelvin=6500)
+    assert clamp_color_temp_to_state(state, 2000) == 2000
+
+
+def test_clamp_to_state_none_state():
+    """Missing entity state leaves the value unchanged."""
+    assert clamp_color_temp_to_state(None, 2000) == 2000
+
+
+def test_clamp_to_state_missing_bounds():
+    """A light that reports no range leaves the value unchanged."""
+    state = MagicMock()
+    state.attributes = {"supported_color_modes": ["xy"]}
+    assert clamp_color_temp_to_state(state, 2000) == 2000

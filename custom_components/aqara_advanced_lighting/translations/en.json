@@ -84,7 +84,8 @@
       "unknown": "An unexpected error occurred."
     },
     "abort": {
-      "already_configured": "An instance with this configuration is already set up."
+      "already_configured": "An instance with this configuration is already set up.",
+      "zha_no_reconfigure": "ZHA instances have no settings to reconfigure."
     }
   },
   "exceptions": {

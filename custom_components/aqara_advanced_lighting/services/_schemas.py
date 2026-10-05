@@ -50,6 +50,8 @@ from ..const import (
     ATTR_Z2M_BASE_TOPIC,
     AUDIO_COLOR_ADVANCE_ON_ONSET,
     CCT_MODE_STANDARD,
+    CCT_SEQUENCE_MAX_KELVIN,
+    CCT_SEQUENCE_MIN_KELVIN,
     DEFAULT_AUDIO_DETECTION_MODE,
     DEFAULT_AUDIO_FREQUENCY_ZONE,
     DEFAULT_AUDIO_PREDICTION_AGGRESSIVENESS,
@@ -71,7 +73,6 @@ from ..const import (
     MAX_AUDIO_SENSITIVITY,
     MAX_AUDIO_TRANSITION_SPEED,
     MAX_BRIGHTNESS_PERCENT,
-    MAX_COLOR_TEMP_KELVIN,
     MAX_DURATION,
     MAX_HOLD_TIME,
     MAX_LOOP_COUNT,
@@ -83,7 +84,6 @@ from ..const import (
     MIN_AUDIO_SENSITIVITY,
     MIN_AUDIO_TRANSITION_SPEED,
     MIN_BRIGHTNESS_PERCENT,
-    MIN_COLOR_TEMP_KELVIN,
     MIN_DURATION,
     MIN_HOLD_TIME,
     MIN_LOOP_COUNT,
@@ -268,7 +268,7 @@ def _add_cct_step_fields(schema_dict: dict, step_num: int) -> None:
     """Add CCT sequence step fields to a schema dict."""
     schema_dict[vol.Optional(f"step_{step_num}_color_temp")] = vol.All(
         vol.Coerce(int),
-        vol.Range(min=MIN_COLOR_TEMP_KELVIN, max=MAX_COLOR_TEMP_KELVIN),
+        vol.Range(min=CCT_SEQUENCE_MIN_KELVIN, max=CCT_SEQUENCE_MAX_KELVIN),
     )
     schema_dict[vol.Optional(f"step_{step_num}_brightness")] = vol.All(
         vol.Coerce(int),
@@ -360,7 +360,7 @@ SOLAR_STEP_SCHEMA = vol.Schema(
             vol.Coerce(float), vol.Range(min=-90.0, max=90.0)
         ),
         vol.Required("color_temp"): vol.All(
-            vol.Coerce(int), vol.Range(min=MIN_COLOR_TEMP_KELVIN, max=MAX_COLOR_TEMP_KELVIN)
+            vol.Coerce(int), vol.Range(min=CCT_SEQUENCE_MIN_KELVIN, max=CCT_SEQUENCE_MAX_KELVIN)
         ),
         vol.Required("brightness"): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=255)
@@ -373,7 +373,7 @@ SCHEDULE_STEP_SCHEMA = vol.Schema(
     {
         vol.Required("time"): cv.string,
         vol.Required("color_temp"): vol.All(
-            vol.Coerce(int), vol.Range(min=MIN_COLOR_TEMP_KELVIN, max=MAX_COLOR_TEMP_KELVIN)
+            vol.Coerce(int), vol.Range(min=CCT_SEQUENCE_MIN_KELVIN, max=CCT_SEQUENCE_MAX_KELVIN)
         ),
         vol.Required("brightness"): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=255)

@@ -9,6 +9,8 @@ from homeassistant.config_entries import ConfigEntry
 
 from .const import (
     AUDIO_COLOR_ADVANCE_ON_ONSET,
+    CCT_SEQUENCE_MAX_KELVIN,
+    CCT_SEQUENCE_MIN_KELVIN,
     DEFAULT_AUDIO_DETECTION_MODE,
     DEFAULT_AUDIO_FREQUENCY_ZONE,
     DEFAULT_AUDIO_PREDICTION_AGGRESSIVENESS,
@@ -496,15 +498,20 @@ class Z2MDevice:
 class CCTSequenceStep:
     """Single step in a CCT dynamic sequence."""
 
-    color_temp: int  # Color temperature in kelvin (2700-6500)
+    color_temp: int  # Color temperature in kelvin
     brightness: int  # Brightness 1-255
     transition: float  # Transition time to reach this step (seconds)
     hold: float  # Hold time after transition completes before next step (seconds)
 
     def __post_init__(self) -> None:
         """Validate step parameters."""
-        if not (2700 <= self.color_temp <= 6500):
-            msg = f"Color temp must be 2700-6500K, got {self.color_temp}"
+        if not (
+            CCT_SEQUENCE_MIN_KELVIN <= self.color_temp <= CCT_SEQUENCE_MAX_KELVIN
+        ):
+            msg = (
+                f"Color temp must be {CCT_SEQUENCE_MIN_KELVIN}-"
+                f"{CCT_SEQUENCE_MAX_KELVIN}K, got {self.color_temp}"
+            )
             raise ValueError(msg)
         if not (1 <= self.brightness <= 255):
             msg = f"Brightness must be 1-255, got {self.brightness}"

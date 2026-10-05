@@ -20,6 +20,7 @@ from ..sun_utils import SolarStep
 from ._helpers import (
     _build_schedule_sequence,
     _get_any_cct_manager,
+    _resolve_entity_ids,
 )
 
 from homeassistant.const import ATTR_ENTITY_ID
@@ -31,7 +32,7 @@ async def handle_resume_entity_control(hass: HomeAssistant, call: ServiceCall) -
 
     Resumes control of entities that were paused due to external changes.
     """
-    entity_ids: list[str] = call.data[ATTR_ENTITY_ID]
+    entity_ids = _resolve_entity_ids(hass, call.data[ATTR_ENTITY_ID])
 
     entity_controller = hass.data[DOMAIN].get(DATA_ENTITY_CONTROLLER)
     if not entity_controller:
@@ -47,7 +48,7 @@ async def handle_resume_entity_control(hass: HomeAssistant, call: ServiceCall) -
 
 async def handle_start_circadian_mode(hass: HomeAssistant, call: ServiceCall) -> None:
     """Handle start_circadian_mode service call."""
-    entity_ids: list[str] = call.data[ATTR_ENTITY_ID]
+    entity_ids = _resolve_entity_ids(hass, call.data[ATTR_ENTITY_ID])
     preset_name: str | None = call.data.get(ATTR_PRESET)
 
     # Resolve preset data from user presets first, then built-in
@@ -149,7 +150,7 @@ async def handle_start_circadian_mode(hass: HomeAssistant, call: ServiceCall) ->
 
 async def handle_stop_circadian_mode(hass: HomeAssistant, call: ServiceCall) -> None:
     """Handle stop_circadian_mode service call."""
-    entity_ids: list[str] = call.data[ATTR_ENTITY_ID]
+    entity_ids = _resolve_entity_ids(hass, call.data[ATTR_ENTITY_ID])
 
     circadian_mgr = hass.data.get(DOMAIN, {}).get(DATA_CIRCADIAN_MANAGER)
     if not circadian_mgr:

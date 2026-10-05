@@ -2,6 +2,25 @@
 
 All notable changes to the Aqara Advanced Lighting integration will be documented in this file.
 
+## [1.3.6] - 2026/10/05
+
+### Added
+
+  - CCT sequences now accept colour temperatures down to 2000K, from 2700K, in standard, schedule and solar steps, in the editor, `start_cct_sequence` and the circadian service. The 2700K floor matched the T2 CCT bulb, but many other lights reach 2200K or 2000K. Every value is limited to the range each light reports, so in a sequence running on several lights, one that cannot go as warm holds at its warmest setting for that part while the others continue, and the steps stay in sync. A light that reports no range keeps the previous 2700-6500K limit.
+  - The CCT sequence editor now shows a notice naming any selected light whose range does not cover every step, with that light's own range. Lights inside a selected group are checked individually.
+
+### Fixed
+
+  - Solar and schedule sequences and the circadian overlay could send a light a colour temperature outside the range it reports. Standard steps were already limited to the light's range, but the values applied when a light turned on or a sequence resumed, the values applied while brightness was overridden, and every circadian update were not. A light whose minimum was above the sequence's warmest value was also treated as changed outside Home Assistant and paused, because the sequence compared what the light reported with the unlimited target.
+  - Light groups inside light groups are now expanded to their member lights. Only the top level was expanded before, so a nested group was treated as a single light. This applies to every service that accepts groups.
+  - The circadian service now expands light groups as the other services do. Starting it on a group used the group's combined range, which is the widest of its members, so a member could be sent a value outside its own range. Stopping and resuming by group now act on the member lights as well.
+  - On ZHA, the T1M's second endpoint (the ring light) now also receives the integration's Aqara cluster, matching the first endpoint. - by Lorenzo Marroccoli
+  - Reconfiguring a ZHA instance showed the untranslated reason `zha_no_reconfigure`. It now reads "ZHA instances have no settings to reconfigure."
+
+### Changed
+
+  - The CCT editor timeline's colour scale now starts at 2000K, so steps at 2700K appear slightly less amber in the timeline than before. Preset thumbnails are unchanged.
+
 ## [1.3.5] - 2026/09/11
 
 ### Fixed

@@ -84,3 +84,17 @@ def clamp_color_temp(
 ) -> int:
     """Clamp a color temperature to the light's supported range."""
     return max(min_kelvin, min(color_temp, max_kelvin))
+
+def clamp_color_temp_to_state(state: Any, color_temp: int) -> int:
+    """Clamp a color temperature to the range a light entity reports.
+
+    Returns the value unchanged when the state or either bound is missing.
+    """
+    if state is None:
+        return color_temp
+    attrs: dict[str, Any] = getattr(state, "attributes", {})
+    min_k = attrs.get("min_color_temp_kelvin")
+    max_k = attrs.get("max_color_temp_kelvin")
+    if min_k is None or max_k is None:
+        return color_temp
+    return clamp_color_temp(color_temp, min_k, max_k)

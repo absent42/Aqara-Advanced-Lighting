@@ -236,45 +236,43 @@ def _get_zones_for_device(
     return zones if zones else None
 
 def _resolve_entity_ids(hass: HomeAssistant, entity_ids: list[str]) -> list[str]:
-    """Resolve entity IDs, expanding groups to individual lights.
+    """Resolve entity IDs, expanding light groups (including nested) to lights.
 
     Args:
         hass: Home Assistant instance
         entity_ids: List of entity IDs (may include groups)
 
     Returns:
-        List of individual light entity IDs
+        List of individual light entity IDs, deduplicated in order
     """
-    resolved = []
-    for entity_id in entity_ids:
+    resolved: list[str] = []
+    seen: set[str] = set()
+
+    def _add(entity_id: str) -> None:
+        if entity_id in seen:
+            return
+        seen.add(entity_id)
         state = hass.states.get(entity_id)
-        if state and state.domain == "light":
-            # Check if this is a group by looking for entity_id attribute
-            if group_entities := state.attributes.get("entity_id"):
-                # This is a light group - add all member entities
-                resolved.extend(group_entities)
-                _LOGGER.debug(
-                    "Resolved group %s to %d entities: %s",
-                    entity_id,
-                    len(group_entities),
-                    group_entities,
-                )
-            else:
-                # Single light entity
-                resolved.append(entity_id)
-        else:
-            # Entity not found or not a light - add anyway for validation
-            resolved.append(entity_id)
+        if (
+            state
+            and state.domain == "light"
+            and (members := state.attributes.get("entity_id"))
+        ):
+            _LOGGER.debug(
+                "Resolved group %s to %d entities: %s",
+                entity_id,
+                len(members),
+                members,
+            )
+            for member in members:
+                _add(member)
+            return
+        # Single light, or unknown entity kept for later validation
+        resolved.append(entity_id)
 
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_resolved = []
-    for entity_id in resolved:
-        if entity_id not in seen:
-            seen.add(entity_id)
-            unique_resolved.append(entity_id)
-
-    return unique_resolved
+    for entity_id in entity_ids:
+        _add(entity_id)
+    return resolved
 
 def _validate_supported_entities(hass: HomeAssistant, entity_ids: list[str]) -> None:
     """Validate that all entities are supported Aqara devices.
